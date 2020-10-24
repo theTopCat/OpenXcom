@@ -20,7 +20,6 @@
 #include <vector>
 #include <string>
 #include <SDL.h>
-#include "../Savegame/Soldier.h"
 #include "LocalizedText.h"
 
 namespace OpenXcom
@@ -33,6 +32,8 @@ class Window;
 class Action;
 class SavedBattleGame;
 class RuleInterface;
+
+enum SoldierGender : char;
 
 /**
  * A game state that receives user input and reacts accordingly.
@@ -111,7 +112,7 @@ public:
 
 	/// Changes a set of colors on the state's 8bpp palette.
 	void setStatePalette(const SDL_Color *colors, int firstcolor = 0, int ncolors = 256);
-	/// Changes a set of colors on the state's 8bpp palette.
+	/// Changes a set of colors on the state's 8bpp palette of helper surfaces.
 	void setModPalette();
 
 	/// Changes the state's 8bpp palette with certain resources.

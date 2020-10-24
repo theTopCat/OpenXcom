@@ -138,20 +138,6 @@ PurchaseState::PurchaseState(Base *base) : _base(base), _sel(0), _total(0), _pQt
 	_cats.push_back("STR_ALL_ITEMS");
 	_cats.push_back("STR_FILTER_HIDDEN");
 
-	const std::vector<std::string> &cw = _game->getMod()->getCraftWeaponsList();
-	for (std::vector<std::string>::const_iterator i = cw.begin(); i != cw.end(); ++i)
-	{
-		RuleCraftWeapon *rule = _game->getMod()->getCraftWeapon(*i);
-		_craftWeapons.insert(rule->getLauncherItem());
-		_craftWeapons.insert(rule->getClipItem());
-	}
-	const std::vector<std::string> &ar = _game->getMod()->getArmorsList();
-	for (std::vector<std::string>::const_iterator i = ar.begin(); i != ar.end(); ++i)
-	{
-		Armor *rule = _game->getMod()->getArmor(*i);
-		_armors.insert(rule->getStoreItem());
-	}
-
 	auto providedBaseFunc = _base->getProvidedBaseFunc({});
 	const std::vector<std::string> &soldiers = _game->getMod()->getSoldiersList();
 	for (std::vector<std::string>::const_iterator i = soldiers.begin(); i != soldiers.end(); ++i)
@@ -210,7 +196,7 @@ PurchaseState::PurchaseState(Base *base) : _base(base), _sel(0), _total(0), _pQt
 		auto purchaseBaseFunc = rule->getRequiresBuyBaseFunc();
 		if (rule->getBuyCost() != 0 && _game->getSavedGame()->isResearched(rule->getRequirements()) && _game->getSavedGame()->isResearched(rule->getBuyRequirements()) && (~providedBaseFunc & purchaseBaseFunc).none())
 		{
-			TransferRow row = { TRANSFER_ITEM, rule, tr(rule->getType()), rule->getBuyCost(), _base->getStorageItems()->getItem(rule->getType()), 0, 0 };
+			TransferRow row = { TRANSFER_ITEM, rule, tr(rule->getType()), rule->getBuyCost(), _base->getStorageItems()->getItem(rule), 0, 0 };
 			_items.push_back(row);
 			std::string cat = getCategory(_items.size() - 1);
 			if (std::find(_cats.begin(), _cats.end(), cat) == _cats.end())
@@ -220,7 +206,8 @@ PurchaseState::PurchaseState(Base *base) : _base(base), _sel(0), _total(0), _pQt
 		}
 	}
 
-	if (_game->getMod()->getUseCustomCategories())
+	_vanillaCategories = _cats.size();
+	if (_game->getMod()->getDisplayCustomCategories() > 0)
 	{
 		bool hasUnassigned = false;
 
@@ -245,9 +232,13 @@ PurchaseState::PurchaseState(Base *base) : _base(base), _sel(0), _total(0), _pQt
 			}
 		}
 		// then use them nicely in order
-		_cats.clear();
-		_cats.push_back("STR_ALL_ITEMS");
-		_cats.push_back("STR_FILTER_HIDDEN");
+		if (_game->getMod()->getDisplayCustomCategories() == 1)
+		{
+			_cats.clear();
+			_cats.push_back("STR_ALL_ITEMS");
+			_cats.push_back("STR_FILTER_HIDDEN");
+			_vanillaCategories = _cats.size();
+		}
 		const std::vector<std::string> &categories = _game->getMod()->getItemCategoriesList();
 		for (std::vector<std::string>::const_iterator k = categories.begin(); k != categories.end(); ++k)
 		{
@@ -319,18 +310,18 @@ std::string PurchaseState::getCategory(int sel) const
 		rule = (RuleItem*)_items[sel].rule;
 		if (rule->getBattleType() == BT_CORPSE || rule->isAlien())
 		{
+			if (rule->getVehicleUnit())
+				return "STR_PERSONNEL"; // OXCE: critters fighting for us
+			if (rule->isAlien())
+				return "STR_PRISONERS"; // OXCE: live aliens
 			return "STR_ALIENS";
 		}
 		if (rule->getBattleType() == BT_NONE)
 		{
-			if (_craftWeapons.find(rule->getType()) != _craftWeapons.end())
-			{
+			if (_game->getMod()->isCraftWeaponStorageItem(rule))
 				return "STR_CRAFT_ARMAMENT";
-			}
-			if (_armors.find(rule->getType()) != _armors.end())
-			{
-				return "STR_EQUIPMENT";
-			}
+			if (_game->getMod()->isArmorStorageItem(rule))
+				return "STR_ARMORS"; // OXCE: armors
 			return "STR_COMPONENTS";
 		}
 		return "STR_EQUIPMENT";
@@ -454,7 +445,8 @@ void PurchaseState::updateList()
 	_lstItems->clearList();
 	_rows.clear();
 
-	const std::string selectedCategory = _cats[_cbxCategory->getSelected()];
+	size_t selCategory = _cbxCategory->getSelected();
+	const std::string selectedCategory = _cats[selCategory];
 	bool categoryFilterEnabled = (selectedCategory != "STR_ALL_ITEMS");
 	bool categoryUnassigned = (selectedCategory == "STR_UNASSIGNED");
 	bool categoryHidden = (selectedCategory == "STR_FILTER_HIDDEN");
@@ -474,7 +466,7 @@ void PurchaseState::updateList()
 		{
 			continue;
 		}
-		else if (_game->getMod()->getUseCustomCategories())
+		else if (selCategory >= _vanillaCategories)
 		{
 			if (categoryUnassigned && _items[i].type == TRANSFER_ITEM)
 			{
@@ -820,7 +812,7 @@ void PurchaseState::increaseByValue(int change)
 			break;
 		case TRANSFER_ITEM:
 			rule = (RuleItem*)getRow().rule;
-			if (_iQty + rule->getSize() > _base->getAvailableStores() - _base->getUsedStores())
+			if (_base->storesOverfull(_iQty + rule->getSize()))
 			{
 				errorMessage = tr("STR_NOT_ENOUGH_STORE_SPACE");
 			}

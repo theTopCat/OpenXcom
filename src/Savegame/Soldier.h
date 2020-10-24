@@ -26,9 +26,9 @@
 namespace OpenXcom
 {
 
-enum SoldierRank { RANK_ROOKIE, RANK_SQUADDIE, RANK_SERGEANT, RANK_CAPTAIN, RANK_COLONEL, RANK_COMMANDER};
-enum SoldierGender { GENDER_MALE, GENDER_FEMALE };
-enum SoldierLook { LOOK_BLONDE, LOOK_BROWNHAIR, LOOK_ORIENTAL, LOOK_AFRICAN };
+enum SoldierRank : char { RANK_ROOKIE, RANK_SQUADDIE, RANK_SERGEANT, RANK_CAPTAIN, RANK_COLONEL, RANK_COMMANDER};
+enum SoldierGender : char { GENDER_MALE, GENDER_FEMALE };
+enum SoldierLook : char { LOOK_BLONDE, LOOK_BROWNHAIR, LOOK_ORIENTAL, LOOK_AFRICAN };
 
 class Craft;
 class SoldierNamePool;
@@ -80,6 +80,7 @@ private:
 	Armor *_transformedArmor;
 	std::vector<EquipmentLayoutItem*> _equipmentLayout;           // last used equipment layout, managed by the game
 	std::vector<EquipmentLayoutItem*> _personalEquipmentLayout;   // personal  equipment layout, managed by the player
+	const Armor* _personalEquipmentArmor;
 	SoldierDeath *_death;
 	SoldierDiary *_diary;
 	std::string _statString;
@@ -93,7 +94,7 @@ public:
 	/// Cleans up the soldier.
 	~Soldier();
 	/// Loads the soldier from YAML.
-	void load(const YAML::Node& node, const Mod *mod, SavedGame *save, const ScriptGlobal *shared);
+	void load(const YAML::Node& node, const Mod *mod, SavedGame *save, const ScriptGlobal *shared, bool soldierTemplate = false);
 	/// Saves the soldier to YAML.
 	YAML::Node save(const ScriptGlobal *shared) const;
 	/// Gets the soldier's name.
@@ -220,10 +221,17 @@ public:
 	/// Gets the soldier's equipment-layout.
 	std::vector<EquipmentLayoutItem*> *getEquipmentLayout();
 	std::vector<EquipmentLayoutItem*> *getPersonalEquipmentLayout() { return &_personalEquipmentLayout; }
+	/// Gets the soldier's personal equipment armor.
+	const Armor* getPersonalEquipmentArmor() const { return _personalEquipmentArmor; }
+	/// Sets the soldier's personal equipment armor.
+	void setPersonalEquipmentArmor(const Armor* armor) { _personalEquipmentArmor = armor; }
+
 	/// Trains a soldier's psychic stats
 	void trainPsi();
 	/// Trains a soldier's psionic abilities (anytimePsiTraining option).
 	void trainPsi1Day();
+	/// Is the soldier already fully psi-trained?
+	bool isFullyPsiTrained();
 	/// Returns whether the unit is in psi training or not
 	bool isInPsiTraining() const;
 	/// set the psi training status
@@ -265,7 +273,7 @@ public:
 	/// Performs a transformation on this soldier
 	void transform(const Mod *mod, RuleSoldierTransformation *transformationRule, Soldier *sourceSoldier);
 	/// Calculates how this project changes the soldier's stats
-	UnitStats calculateStatChanges(const Mod *mod, RuleSoldierTransformation *transformationRule, Soldier *sourceSoldier, int mode);
+	UnitStats calculateStatChanges(const Mod *mod, RuleSoldierTransformation *transformationRule, Soldier *sourceSoldier, int mode, const RuleSoldier *sourceSoldierType);
 	/// Gets all the soldier bonuses
 	const std::vector<const RuleSoldierBonus*> *getBonuses(const Mod *mod);
 	/// Get pointer to current stats with soldier bonuses, but without armor bonuses.

@@ -22,7 +22,6 @@
 #include <yaml-cpp/yaml.h>
 #include "RuleStatBonus.h"
 #include "RuleDamageType.h"
-#include "Unit.h"
 #include "ModScript.h"
 #include "RuleResearch.h"
 #include "RuleBaseFacilityFunctions.h"
@@ -55,10 +54,12 @@ enum ExperienceTrainingMode {
 };
 enum BattleActionType : Uint8 { BA_NONE, BA_TURN, BA_WALK, BA_KNEEL, BA_PRIME, BA_UNPRIME, BA_THROW, BA_AUTOSHOT, BA_SNAPSHOT, BA_AIMEDSHOT, BA_HIT, BA_USE, BA_LAUNCH, BA_MINDCONTROL, BA_PANIC, BA_RETHINK, BA_CQB };
 
+enum class BattleActionOrigin { CENTRE = 0, LEFT, RIGHT }; // Used for off-centre shooting.
 
 struct BattleActionCost;
 class BattleItem;
 class RuleSkill;
+class Unit;
 class SurfaceSet;
 class Surface;
 class Mod;
@@ -297,6 +298,7 @@ private:
 	Unit* _vehicleUnit;
 	double _size;
 	int _costBuy, _costSell, _transferTime, _weight;
+	int _throwRange, _underwaterThrowRange;
 	int _bigSprite;
 	int _floorSprite;
 	int _handSprite, _bulletSprite;
@@ -318,7 +320,8 @@ private:
 	bool _hidePower;
 	float _powerRangeReduction;
 	float _powerRangeThreshold;
-	std::vector<std::string> _compatibleAmmo[AmmoSlotMax];
+	std::vector<std::vector<std::string>> _compatibleAmmoNames = std::vector<std::vector<std::string>>(AmmoSlotMax);
+	std::vector<const RuleItem*> _compatibleAmmo[AmmoSlotMax];
 	RuleDamageType _damageType, _meleeType;
 	RuleItemAction _confAimed, _confAuto, _confSnap, _confMelee;
 	int _accuracyUse, _accuracyMind, _accuracyPanic, _accuracyThrow, _accuracyCloseQuarters;
@@ -332,7 +335,7 @@ private:
 	std::string _medikitActionName, _psiAttackName, _primeActionName, _unprimeActionName, _primeActionMessage, _unprimeActionMessage;
 	bool _twoHanded, _blockBothHands, _fixedWeapon, _fixedWeaponShow, _isConsumable, _isFireExtinguisher, _isExplodingInHands, _specialUseEmptyHand;
 	std::string _defaultInventorySlotName;
-	RuleInventory* _defaultInventorySlot; //TODO: fix constness
+	const RuleInventory* _defaultInventorySlot;
 	int _defaultInvSlotX, _defaultInvSlotY;
 	std::vector<std::string> _supportedInventorySectionsNames;
 	std::vector<const RuleInventory*> _supportedInventorySections;
@@ -359,9 +362,10 @@ private:
 	std::map<std::string, std::string> _zombieUnitByArmorMale, _zombieUnitByArmorFemale, _zombieUnitByType;
 	std::string _zombieUnit, _spawnUnit;
 	int _spawnUnitFaction;
-	int _psiTargetMatrix;
+	int _targetMatrix;
 	bool _LOSRequired, _underwaterOnly, _landOnly, _psiReqiured, _manaRequired;
 	int _meleePower, _specialType, _vaporColor, _vaporDensity, _vaporProbability;
+	int _vaporColorSurface, _vaporDensitySurface, _vaporProbabilitySurface;
 	std::vector<int> _customItemPreviewIndex;
 	int _kneelBonus, _oneHandedPenalty;
 	int _monthlySalary, _monthlyMaintenance;
@@ -438,6 +442,12 @@ public:
 	int getTransferTime() const;
 	/// Gets the item's weight.
 	int getWeight() const;
+	/// Gets the item's maximum throw range.
+	int getThrowRange() const { return _throwRange; }
+	int getThrowRangeSq() const { return _throwRange * _throwRange; }
+	/// Gets the item's maximum underwater throw range.
+	int getUnderwaterThrowRange() const { return _underwaterThrowRange; }
+	int getUnderwaterThrowRangeSq() const { return _underwaterThrowRange * _underwaterThrowRange; }
 	/// Gets the item's reference in BIGOBS.PCK for use in inventory.
 	int getBigSprite() const;
 	/// Gets the item's reference in FLOOROB.PCK for use in battlescape.
@@ -456,7 +466,7 @@ public:
 	bool getFixedShow() const;
 
 	/// Get name of the default inventory slot.
-	RuleInventory* getDefaultInventorySlot() const { return _defaultInventorySlot; }
+	const RuleInventory* getDefaultInventorySlot() const { return _defaultInventorySlot; }
 	/// Get inventory slot default X position.
 	int getDefaultInventorySlotX() const { return _defaultInvSlotX; }
 	/// Get inventory slot default Y position.
@@ -629,12 +639,18 @@ public:
 	int getTULoad(int slot) const;
 	/// Gets the item's unload TU cost.
 	int getTUUnload(int slot) const;
+	/// Gets the ammo type for a vehicle.
+	const RuleItem* getVehicleClipAmmo() const;
+	/// Gets the maximum number of rounds for a vehicle. E.g. a vehicle that can load 6 clips with 10 rounds each, returns 60.
+	int getVehicleClipSize() const;
+	/// Gets the number of clips needed to fully load a vehicle. E.g. a vehicle that holds max 60 rounds and clip size is 10, returns 6.
+	int getVehicleClipsLoaded() const;
 	/// Gets list of compatible ammo.
-	const std::vector<std::string> *getPrimaryCompatibleAmmo() const;
+	const std::vector<const RuleItem*> *getPrimaryCompatibleAmmo() const;
 	/// Get slot position for ammo type.
-	int getSlotForAmmo(const std::string &type) const;
+	int getSlotForAmmo(const RuleItem* type) const;
 	/// Get slot position for ammo type.
-	const std::vector<std::string> *getCompatibleAmmoForSlot(int slot) const;
+	const std::vector<const RuleItem*> *getCompatibleAmmoForSlot(int slot) const;
 
 	/// Gets the item's damage type.
 	const RuleDamageType *getDamageType() const;
@@ -797,9 +813,9 @@ public:
 	const std::string &getSpawnUnit() const;
 	/// Gets which faction the spawned unit should have.
 	int getSpawnUnitFaction() const;
-	/// Checks the psiamp's allowed targets. Not used in AI. Mind control of the same faction is hardcoded disabled.
-	bool isPsiTargetAllowed(UnitFaction targetFaction) const;
-	int getPsiTargetMatrixRaw() const { return _psiTargetMatrix; }
+	/// Checks if this item can be used to target a given faction.
+	bool isTargetAllowed(UnitFaction targetFaction) const;
+	int getTargetMatrixRaw() const { return _targetMatrix; }
 	/// Check if LOS is required to use this item (only applies to psionic type items)
 	bool isLOSRequired() const;
 	/// Is this item restricted to underwater use?
@@ -813,11 +829,11 @@ public:
 	/// Get the associated special type of this item.
 	int getSpecialType() const;
 	/// Get the color offset to use for the vapor trail.
-	int getVaporColor() const;
+	int getVaporColor(int depth) const;
 	/// Gets the vapor cloud density.
-	int getVaporDensity() const;
+	int getVaporDensity(int depth) const;
 	/// Gets the vapor cloud probability.
-	int getVaporProbability() const;
+	int getVaporProbability(int depth) const;
 	/// Gets the index of the sprite in the CustomItemPreview sprite set
 	const std::vector<int> &getCustomItemPreviewIndex() const;
 	/// Gets the kneel bonus.

@@ -257,6 +257,14 @@ void BattlescapeGenerator::nextStage()
 			{
 				_save->getTileEngine()->itemDropInventory((*unit)->getTile(), (*unit));
 			}
+
+			//spawn corpse/body for unit to recover
+			for (int i = (*unit)->getArmor()->getTotalSize() - 1; i >= 0; --i)
+			{
+				auto corpse = _save->createItemForTile((*unit)->getArmor()->getCorpseBattlescape()[i], nullptr);
+				corpse->setUnit((*unit));
+				_save->getTileEngine()->itemDrop((*unit)->getTile(), corpse, false);
+			}
 		}
 	}
 
@@ -350,12 +358,12 @@ void BattlescapeGenerator::nextStage()
 							if (tile->getMapData(O_FLOOR))
 							{
 								// in the skyranger? it goes home.
-								if (tile->getMapData(O_FLOOR)->getSpecialType() == START_POINT)
+								if (tile->getFloorSpecialTileType() == START_POINT)
 								{
 									toContainer = takeHomeGuaranteed;
 								}
 								// on the exit grid? it goes to stage two.
-								else if (tile->getMapData(O_FLOOR)->getSpecialType() == END_POINT)
+								else if (tile->getFloorSpecialTileType() == END_POINT)
 								{
 									// apply similar logic (for units) as in protocol 1
 									if ((*i)->getUnit() &&
@@ -801,22 +809,12 @@ void BattlescapeGenerator::deployXCOM(const RuleStartingCondition* startingCondi
 				if (startingCondition != 0 && !startingCondition->isVehiclePermitted(item->getType()))
 				{
 					// send disabled vehicles back to base
-					_base->getStorageItems()->addItem(item->getType(), 1);
+					_base->getStorageItems()->addItem(item, 1);
 					// ammo too, if necessary
-					if (!item->getPrimaryCompatibleAmmo()->empty())
+					if (item->getVehicleClipAmmo())
 					{
 						// Calculate how much ammo needs to be added to the base.
-						RuleItem *ammo = _game->getMod()->getItem(item->getPrimaryCompatibleAmmo()->front(), true);
-						int ammoPerVehicle;
-						if (ammo->getClipSize() > 0 && item->getClipSize() > 0)
-						{
-							ammoPerVehicle = item->getClipSize() / ammo->getClipSize();
-						}
-						else
-						{
-							ammoPerVehicle = ammo->getClipSize();
-						}
-						_base->getStorageItems()->addItem(ammo->getType(), ammoPerVehicle);
+						_base->getStorageItems()->addItem(item->getVehicleClipAmmo(), item->getVehicleClipsLoaded());
 					}
 				}
 				else if (item->getVehicleUnit()->getArmor()->getSize() > 1 || Mod::EXTENDED_HWP_LOAD_ORDER == false)
@@ -1159,10 +1157,9 @@ BattleUnit *BattlescapeGenerator::addXCOMVehicle(Vehicle *v)
 	if (unit)
 	{
 		_save->createItemForUnit(v->getRules(), unit, true);
-		if (!v->getRules()->getPrimaryCompatibleAmmo()->empty())
+		if (v->getRules()->getVehicleClipAmmo())
 		{
-			std::string ammo = v->getRules()->getPrimaryCompatibleAmmo()->front();
-			BattleItem *ammoItem = _save->createItemForUnit(ammo, unit);
+			BattleItem *ammoItem = _save->createItemForUnit(v->getRules()->getVehicleClipAmmo(), unit);
 			if (ammoItem)
 			{
 				ammoItem->setAmmoQuantity(v->getAmmo());
@@ -1283,9 +1280,9 @@ bool BattlescapeGenerator::canPlaceXCOMUnit(Tile *tile)
 {
 	// to spawn an xcom soldier, there has to be a tile, with a floor, with the starting point attribute and no object in the way
 	if (tile &&
-		tile->getMapData(O_FLOOR) &&
-		tile->getMapData(O_FLOOR)->getSpecialType() == START_POINT &&
+		tile->getFloorSpecialTileType() == START_POINT &&
 		!tile->getMapData(O_OBJECT) &&
+		tile->getMapData(O_FLOOR) && // for clarity this is checked again, first time was in `getFloorSpecialTileType`
 		tile->getMapData(O_FLOOR)->getTUCost(MT_WALK) < 255)
 	{
 		if (_craftInventoryTile == 0)
@@ -1452,9 +1449,8 @@ BattleUnit *BattlescapeGenerator::addAlien(Unit *rules, int alienRank, bool outs
 	}
 	else
 	{
-		// ASSASSINATION CHALLENGE SPECIAL: screw the player, just because we didn't find a node,
-		// doesn't mean we can't ruin Tornis's day: spawn as many aliens as possible.
-		if (_game->getSavedGame()->getDifficulty() >= DIFF_SUPERHUMAN && placeUnitNearFriend(unit))
+		// DEMIGOD DIFFICULTY: screw the player: spawn as many aliens as possible.
+		if (_game->getMod()->isDemigod() && placeUnitNearFriend(unit))
 		{
 			unit->setAIModule(new AIModule(_game->getSavedGame()->getSavedBattle(), unit, 0));
 			unit->setRankInt(alienRank);
@@ -1936,8 +1932,7 @@ void BattlescapeGenerator::fuelPowerSources()
 {
 	for (int i = 0; i < _save->getMapSizeXYZ(); ++i)
 	{
-		if (_save->getTile(i)->getMapData(O_OBJECT)
-			&& _save->getTile(i)->getMapData(O_OBJECT)->getSpecialType() == UFO_POWER_SOURCE)
+		if (_save->getTile(i)->getObjectSpecialTileType() == UFO_POWER_SOURCE)
 		{
 			_save->createItemForTile(_game->getMod()->getAlienFuelName(), _save->getTile(i));
 		}
@@ -1952,8 +1947,7 @@ void BattlescapeGenerator::explodePowerSources()
 {
 	for (int i = 0; i < _save->getMapSizeXYZ(); ++i)
 	{
-		if (_save->getTile(i)->getMapData(O_OBJECT)
-			&& _save->getTile(i)->getMapData(O_OBJECT)->getSpecialType() == UFO_POWER_SOURCE && RNG::percent(75))
+		if (_save->getTile(i)->getObjectSpecialTileType() == UFO_POWER_SOURCE && RNG::percent(75))
 		{
 			Position pos;
 			pos.x = _save->getTile(i)->getPosition().x*16;
@@ -2683,7 +2677,7 @@ void BattlescapeGenerator::generateBaseMap()
 	// add modules based on the base's layout
 	for (std::vector<BaseFacility*>::const_iterator i = _base->getFacilities()->begin(); i != _base->getFacilities()->end(); ++i)
 	{
-		if ((*i)->getBuildTime() == 0 || (*i)->getIfHadPreviousFacility())
+		if ((*i)->isBuiltOrHadPreviousFacility())
 		{
 			int num = 0;
 			int xLimit = (*i)->getX() + (*i)->getRules()->getSize() -1;
@@ -2806,9 +2800,15 @@ void BattlescapeGenerator::generateBaseMap()
 			{
 				int x = (*i)->getX();
 				int y = (*i)->getY();
-
+				bool validPos = false;
 				for (std::vector<Position>::const_iterator j = (*i)->getRules()->getStorageTiles().begin(); j != (*i)->getRules()->getStorageTiles().end(); ++j)
 				{
+					if (*j == TileEngine::invalid)
+					{
+						validPos = true;
+						break;
+					}
+
 					if (j->x < 0 || j->x / 10 > (*i)->getRules()->getSize()
 						|| j->y < 0 || j->y / 10 > (*i)->getRules()->getSize()
 						|| j->z < 0 || j->z > _mapsize_z)
@@ -2824,6 +2824,7 @@ void BattlescapeGenerator::generateBaseMap()
 						continue;
 					}
 
+					validPos = true;
 					_save->getStorageSpace().push_back(tilePos);
 
 					if (!_craftInventoryTile) // just to be safe, make sure we have a craft inventory tile
@@ -2833,7 +2834,7 @@ void BattlescapeGenerator::generateBaseMap()
 				}
 
 				// Crash gracefully with some information before we spawn a map where no items could be placed.
-				if (_save->getStorageSpace().size() == 0)
+				if (!validPos)
 				{
 					throw Exception("Could not place items on given tiles in storage facility " + (*i)->getRules()->getType());
 				}

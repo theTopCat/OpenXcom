@@ -181,7 +181,7 @@ void UnitDieBState::think()
 					game->pushState(new InfoboxState(game->getLanguage()->getString("STR_HAS_BEEN_KILLED", _unit->getGender()).arg(_unit->getName(game->getLanguage()))));
 				}
 			}
-			else
+			else if (_unit->indicatorsAreEnabled())
 			{
 				game->pushState(new InfoboxOKState(game->getLanguage()->getString("STR_HAS_BECOME_UNCONSCIOUS", _unit->getGender()).arg(_unit->getName(game->getLanguage()))));
 			}
@@ -285,7 +285,7 @@ void UnitDieBState::convertUnitToCorpse()
 			{
 				if ((*it)->getUnit() == _unit)
 				{
-					RuleItem *corpseRules = _parent->getMod()->getItem(_unit->getArmor()->getCorpseBattlescape()[0], true); // we're in an inventory, so we must be a 1x1 unit
+					auto corpseRules = _unit->getArmor()->getCorpseBattlescape()[0]; // we're in an inventory, so we must be a 1x1 unit
 					(*it)->convertToCorpse(corpseRules);
 					break;
 				}

@@ -17,6 +17,7 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "RuleSkill.h"
+#include "Mod.h"
 #include "../Engine/Collections.h"
 #include "../Engine/ScriptBind.h"
 #include "../Battlescape/BattlescapeGame.h"
@@ -34,11 +35,11 @@ RuleSkill::RuleSkill(const std::string& type) : _type(type),
  * @param node YAML node.
  * @param mod Mod for the skill.
  */
-void RuleSkill::load(const YAML::Node& node, const ModScript& parsers)
+void RuleSkill::load(const YAML::Node& node, Mod *mod, const ModScript& parsers)
 {
 	if (const YAML::Node& parent = node["refNode"])
 	{
-		load(parent, parsers);
+		load(parent, mod, parsers);
 	}
 	_type = node["type"].as<std::string>(_type);
 
@@ -58,8 +59,8 @@ void RuleSkill::load(const YAML::Node& node, const ModScript& parsers)
 	_cost.loadCost(node, "Use");
 	_flat.loadPercent(node, "Use");
 
-	_compatibleWeaponNames = node["compatibleWeapons"].as<std::vector<std::string> >(_compatibleWeaponNames);
-	_requiredBonusNames = node["requiredBonuses"].as<std::vector<std::string> >(_requiredBonusNames);
+	mod->loadUnorderedNames(_type, _compatibleWeaponNames, node["compatibleWeapons"]);
+	mod->loadUnorderedNames(_type,_requiredBonusNames, node["requiredBonuses"]);
 
 	_scriptValues.load(node, parsers.getShared());
 
@@ -71,14 +72,8 @@ void RuleSkill::load(const YAML::Node& node, const ModScript& parsers)
  */
 void RuleSkill::afterLoad(const Mod* mod)
 {
-	for (auto& itemName : _compatibleWeaponNames)
-	{
-		_compatibleWeapons.push_back(mod->getItem(itemName, true));
-	}
-	for (auto& bonusName : _requiredBonusNames)
-	{
-		_requiredBonuses.push_back(mod->getSoldierBonus(bonusName, true));
-	}
+	mod->linkRule(_compatibleWeapons, _compatibleWeaponNames);
+	mod->linkRule(_requiredBonuses, _requiredBonusNames);
 
 	//remove not needed data
 	Collections::removeAll(_compatibleWeaponNames);

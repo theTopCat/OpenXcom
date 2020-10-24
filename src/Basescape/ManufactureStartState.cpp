@@ -101,7 +101,7 @@ ManufactureStartState::ManufactureStartState(Base *base, RuleManufacture *item) 
 	_btnCancel->onMouseClick((ActionHandler)&ManufactureStartState::btnCancelClick);
 	_btnCancel->onKeyboardPress((ActionHandler)&ManufactureStartState::btnCancelClick, Options::keyCancel);
 
-	bool productionPossible = _game->getSavedGame()->getFunds() > _item->getManufactureCost();
+	bool productionPossible = _item->haveEnoughMoneyForOneMoreUnit(_game->getSavedGame()->getFunds());
 	// check available workspace later
 	//int availableWorkSpace = _base->getFreeWorkshops();
 	//productionPossible &= (availableWorkSpace > 0);
@@ -137,7 +137,7 @@ ManufactureStartState::ManufactureStartState(Base *base, RuleManufacture *item) 
 	}
 	for (auto& iter : _item->getRequiredItems())
 	{
-		auto count = base->getStorageItems()->getItem(iter.first->getType());
+		auto count = base->getStorageItems()->getItem(iter.first);
 
 		std::ostringstream s1, s2;
 		s1 << iter.second;

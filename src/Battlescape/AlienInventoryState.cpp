@@ -27,6 +27,7 @@
 #include "../Interface/BattlescapeButton.h"
 #include "../Interface/Text.h"
 #include "../Mod/Mod.h"
+#include "../Mod/Armor.h"
 #include "../Mod/RuleSoldier.h"
 #include "../Ufopaedia/Ufopaedia.h"
 #include "../Savegame/BattleUnit.h"
@@ -194,14 +195,14 @@ AlienInventoryState::AlienInventoryState(BattleUnit *unit)
 
 	// Bleeding indicator
 	tmp = _game->getMod()->getSurface("BigWoundIndicator", false);
-	if (tmp && unit->getFatalWounds() > 0)
+	if (tmp && unit->getFatalWounds() > 0 && unit->indicatorsAreEnabled())
 	{
 		tmp->blitNShade(_soldier, 32, 32);
 	}
 
 	// Burning indicator
 	tmp = _game->getMod()->getSurface("BigBurnIndicator", false);
-	if (tmp && unit->getFire() > 0)
+	if (tmp && unit->getFire() > 0 && unit->indicatorsAreEnabled())
 	{
 		tmp->blitNShade(_soldier, 112, 32);
 	}
@@ -211,6 +212,19 @@ AlienInventoryState::AlienInventoryState(BattleUnit *unit)
 		return;
 
 	auto weaponL = unit->getLeftHandWeapon();
+	if (!weaponL)
+	{
+		auto typesToCheck = { BT_MELEE, BT_FIREARM };
+		for (auto& type : typesToCheck)
+		{
+			weaponL = unit->getSpecialWeapon(type);
+			if (weaponL && weaponL->getRules()->isSpecialUsingEmptyHand())
+			{
+				break;
+			}
+			weaponL = nullptr;
+		}
+	}
 	if (weaponL)
 	{
 		if (weaponL->getRules()->getBattleType() == BT_FIREARM)
@@ -224,6 +238,19 @@ AlienInventoryState::AlienInventoryState(BattleUnit *unit)
 	}
 
 	auto weaponR = unit->getRightHandWeapon();
+	if (!weaponR)
+	{
+		auto typesToCheck = { BT_MELEE, BT_FIREARM };
+		for (auto& type : typesToCheck)
+		{
+			weaponR = unit->getSpecialWeapon(type);
+			if (weaponR && weaponR->getRules()->isSpecialUsingEmptyHand())
+			{
+				break;
+			}
+			weaponR = nullptr;
+		}
+	}
 	if (weaponR)
 	{
 		if (weaponR->getRules()->getBattleType() == BT_FIREARM)
@@ -373,7 +400,7 @@ void AlienInventoryState::calculateRangedWeapon(BattleUnit* unit, BattleItem* we
 						hitChance -= victim->getArmor()->getMeleeDodge(victim) * penalty;
 					}
 				}
-				ss << "hitChance " << hitChance << "% ";
+				ss << "cqcChance " << hitChance << "% ";
 			}
 		}
 	}

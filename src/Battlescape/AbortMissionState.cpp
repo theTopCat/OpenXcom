@@ -26,6 +26,7 @@
 #include "../Interface/TextButton.h"
 #include "../Engine/Action.h"
 #include "../Savegame/SavedBattleGame.h"
+#include "BattlescapeGame.h"
 #include "BattlescapeState.h"
 #include "../Engine/Options.h"
 #include "../Mod/AlienDeployment.h"
@@ -90,7 +91,7 @@ AbortMissionState::AbortMissionState(SavedBattleGame *battleGame, BattlescapeSta
 		for (int i = 0; i < _battleGame->getMapSizeXYZ(); ++i)
 		{
 			Tile *tile = _battleGame->getTile(i);
-			if (tile && tile->getMapData(O_FLOOR) && tile->getMapData(O_FLOOR)->getSpecialType() == END_POINT)
+			if (tile && tile->getFloorSpecialTileType() == END_POINT)
 			{
 				exit = true;
 				break;

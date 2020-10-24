@@ -21,9 +21,7 @@
 #include <string>
 #include <yaml-cpp/yaml.h>
 #include "Tile.h"
-#include "BattleUnit.h"
 #include "../Mod/AlienDeployment.h"
-#include "HitLog.h"
 
 namespace OpenXcom
 {
@@ -33,15 +31,19 @@ class SavedGame;
 class MapDataSet;
 class Node;
 class BattlescapeState;
+class BattlescapeGame;
 class Position;
 class Pathfinding;
 class TileEngine;
 class RuleEnviroEffects;
 class BattleItem;
+class BattleUnit;
 class Mod;
 class State;
 class ItemContainer;
 class RuleItem;
+class HitLog;
+enum HitLogEntryType : int;
 
 /**
  * The battlescape data that gets written to disk when the game is saved.
@@ -197,6 +199,22 @@ public:
 		return &_tiles[getTileIndex(pos)];
 	}
 
+	/**
+	 * Gets the Tile at a given position on the map.
+	 * This method is called over 50mil+ times per turn so it seems useful
+	 * to inline it.
+	 * @param pos Map position.
+	 * @return Pointer to the tile at that position.
+	 */
+	inline const Tile *getTile(Position pos) const
+	{
+		if (pos.x < 0 || pos.y < 0 || pos.z < 0
+			|| pos.x >= _mapsize_x || pos.y >= _mapsize_y || pos.z >= _mapsize_z)
+			return 0;
+
+		return &_tiles[getTileIndex(pos)];
+	}
+
 	/*
 	 * Gets a pointer to the tiles, a tile is the smallest component of battlescape.
 	 * @param pos Index position, less than `getMapSizeXYZ()`.
@@ -320,7 +338,7 @@ public:
 	/// Removes an item from the game.
 	void removeItem(BattleItem *item);
 	/// Add buildIn weapon from list to unit.
-	void addFixedItems(BattleUnit *unit, const std::vector<std::string> &fixed);
+	void addFixedItems(BattleUnit *unit, const std::vector<const RuleItem*> &fixed);
 	/// Init new created unit.
 	void initUnit(BattleUnit *unit, size_t itemLevel = 0);
 	/// Init new created item.
@@ -332,7 +350,7 @@ public:
 	/// Create new built-in item for unit.
 	BattleItem *createItemForUnitBuildin(const RuleItem *rule, BattleUnit *unit);
 	/// Create new item for tile.
-	BattleItem *createItemForTile(RuleItem *rule, Tile *tile);
+	BattleItem *createItemForTile(const RuleItem *rule, Tile *tile);
 	/// Create new item for tile.
 	BattleItem *createItemForTile(const std::string& type, Tile *tile);
 	/// Sets whether the mission was aborted.
@@ -369,8 +387,12 @@ public:
 	bool getUnitsFalling() const;
 	/// Gets a pointer to the BattlescapeState.
 	BattlescapeState *getBattleState();
+	/// Gets a pointer to the BattlescapeState.
+	const BattlescapeState *getBattleState() const;
 	/// Gets a pointer to the BattlescapeGame.
 	BattlescapeGame *getBattleGame();
+	/// Gets a pointer to the BattlescapeGame.
+	const BattlescapeGame *getBattleGame() const;
 	/// Sets the pointer to the BattlescapeState.
 	void setBattleState(BattlescapeState *bs);
 	/// Gets the highest ranked, living XCom unit.

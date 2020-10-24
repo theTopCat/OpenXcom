@@ -31,6 +31,7 @@ class Text;
 class ComboBox;
 class Timer;
 class DogfightState;
+class Craft;
 class Ufo;
 class MissionSite;
 class Base;
@@ -60,6 +61,7 @@ private:
 	std::list<DogfightState*> _dogfights, _dogfightsToBeStarted;
 	std::vector<Craft*> _activeCrafts;
 	size_t _minimizedDogfights;
+	int _slowdownCounter;
 
 	/// Update list of active crafts.
 	const std::vector<Craft*>* updateActiveCrafts();
@@ -160,6 +162,7 @@ public:
 	void zoomOutEffect();
 	/// Multi-dogfights logic handling.
 	void handleDogfights();
+	void handleDogfightMultiAction(int button);
 	/// Dogfight experience handling.
 	void handleDogfightExperience();
 	/// Gets the number of minimized dogfights.

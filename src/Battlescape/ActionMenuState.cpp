@@ -26,6 +26,7 @@
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/BattleItem.h"
 #include "../Mod/Mod.h"
+#include "../Mod/Armor.h"
 #include "../Mod/RuleItem.h"
 #include "ActionMenuItem.h"
 #include "PrimeGrenadeState.h"
@@ -34,6 +35,7 @@
 #include "../Savegame/SavedGame.h"
 #include "../Savegame/SavedBattleGame.h"
 #include "../Savegame/Tile.h"
+#include "../Savegame/HitLog.h"
 #include "Pathfinding.h"
 #include "TileEngine.h"
 #include "../Interface/Text.h"
@@ -94,7 +96,7 @@ ActionMenuState::ActionMenuState(BattleAction *action, int x, int y) : _action(a
 	}
 
 	// priming
-	if (weapon->getFuseTimerDefault() >= 0 )
+	if (weapon->getFuseTimerType() != BFT_NONE)
 	{
 		auto normalWeapon = weapon->getBattleType() != BT_GRENADE && weapon->getBattleType() != BT_FLARE && weapon->getBattleType() != BT_PROXIMITYGRENADE;
 		if (_action->weapon->getFuseTimer() == -1)
@@ -285,6 +287,9 @@ void ActionMenuState::btnActionMenuItemClick(Action *action)
 
 void ActionMenuState::handleAction()
 {
+	// reset potential garbage from the previous action
+	_action->terrainMeleeTilePart = 0;
+
 	{
 		const RuleItem *weapon = _action->weapon->getRules();
 		bool newHitLog = false;
@@ -386,9 +391,9 @@ void ActionMenuState::handleAction()
 								{
 									for (int i = 0; i < BODYPART_MAX; ++i)
 									{
-										if (targetUnit->getFatalWound(i))
+										if (targetUnit->getFatalWound((UnitBodyPart)i))
 										{
-											tileEngine->medikitUse(_action, targetUnit, BMA_HEAL, i);
+											tileEngine->medikitUse(_action, targetUnit, BMA_HEAL, (UnitBodyPart)i);
 											tileEngine->medikitRemoveIfEmpty(_action);
 											break;
 										}
@@ -473,7 +478,10 @@ void ActionMenuState::handleAction()
 				_action->actor,
 				0, &_action->target))
 			{
-				_action->result = "STR_THERE_IS_NO_ONE_THERE";
+				if (!_game->getSavedGame()->getSavedBattle()->getTileEngine()->validTerrainMeleeRange(_action))
+				{
+					_action->result = "STR_THERE_IS_NO_ONE_THERE";
+				}
 			}
 			else
 			{

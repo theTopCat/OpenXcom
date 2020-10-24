@@ -17,6 +17,8 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <algorithm>
+#include "Mod.h"
+#include "Armor.h"
 #include "Unit.h"
 #include "RuleItem.h"
 #include "RuleInventory.h"
@@ -29,8 +31,7 @@
 #include "../Engine/Surface.h"
 #include "../Engine/ScriptBind.h"
 #include "../Engine/RNG.h"
-#include "Mod.h"
-#include <algorithm>
+#include "../Battlescape/BattlescapeGame.h"
 
 namespace OpenXcom
 {
@@ -76,6 +77,21 @@ void UpdateAmmo(BattleActionAttack& attack)
 	}
 }
 
+/**
+ * Update grenade `damage_item` from `weapon_item`.
+ */
+void UpdateGrenade(BattleActionAttack& attack)
+{
+	if (attack.weapon_item && !attack.damage_item)
+	{
+		const auto battleType = attack.weapon_item->getRules()->getBattleType();
+		if (battleType == BT_PROXIMITYGRENADE || battleType == BT_GRENADE)
+		{
+			attack.damage_item = attack.weapon_item;
+		}
+	}
+}
+
 }
 
 /**
@@ -114,6 +130,7 @@ BattleActionAttack BattleActionAttack::GetAferShoot(BattleActionType type, Battl
 	UpdateAttacker(attack);
 	attack.damage_item = ammo;
 	attack.skill_rules = skill;
+	UpdateGrenade(attack);
 	return attack;
 }
 
@@ -127,7 +144,7 @@ const float TilesToVexels = 16.0f;
  * @param type String defining the type.
  */
 RuleItem::RuleItem(const std::string &type) :
-	_type(type), _name(type), _vehicleUnit(nullptr), _size(0.0), _costBuy(0), _costSell(0), _transferTime(24), _weight(3),
+	_type(type), _name(type), _vehicleUnit(nullptr), _size(0.0), _costBuy(0), _costSell(0), _transferTime(24), _weight(3), _throwRange(0), _underwaterThrowRange(0),
 	_bigSprite(-1), _floorSprite(-1), _handSprite(120), _bulletSprite(-1), _specialIconSprite(-1),
 	_hitAnimation(0), _hitMissAnimation(-1),
 	_meleeAnimation(0), _meleeMissAnimation(-1),
@@ -150,9 +167,10 @@ RuleItem::RuleItem(const std::string &type) :
 	_experienceTrainingMode(ETM_DEFAULT), _manaExperience(0), _listOrder(0),
 	_maxRange(200), _minRange(0), _dropoff(2), _bulletSpeed(0), _explosionSpeed(0), _shotgunPellets(0), _shotgunBehaviorType(0), _shotgunSpread(100), _shotgunChoke(100),
 	_spawnUnitFaction(-1),
-	_psiTargetMatrix(6),
+	_targetMatrix(7),
 	_LOSRequired(false), _underwaterOnly(false), _landOnly(false), _psiReqiured(false), _manaRequired(false),
 	_meleePower(0), _specialType(-1), _vaporColor(-1), _vaporDensity(0), _vaporProbability(15),
+	_vaporColorSurface(-1), _vaporDensitySurface(0), _vaporProbabilitySurface(15),
 	_kneelBonus(-1), _oneHandedPenalty(-1),
 	_monthlySalary(0), _monthlyMaintenance(0),
 	_sprayWaypoints(0)
@@ -355,19 +373,21 @@ void RuleItem::load(const YAML::Node &node, Mod *mod, int listOrder, const ModSc
 	_nameAsAmmo = node["nameAsAmmo"].as<std::string>(_nameAsAmmo);
 
 	//requires
-	_requiresName = node["requires"].as< std::vector<std::string> >(_requiresName);
-	_requiresBuyName = node["requiresBuy"].as< std::vector<std::string> >(_requiresBuyName);
+	mod->loadUnorderedNames(_type, _requiresName, node["requires"]);
+	mod->loadUnorderedNames(_type, _requiresBuyName, node["requiresBuy"]);
 	mod->loadBaseFunction(_type, _requiresBuyBaseFunc, node["requiresBuyBaseFunc"]);
 
 
-	_recoveryDividers = node["recoveryDividers"].as< std::map<std::string, int> >(_recoveryDividers);
+	mod->loadUnorderedNamesToInt(_type, _recoveryDividers, node["recoveryDividers"]);
 	_recoveryTransformationsName = node["recoveryTransformations"].as< std::map<std::string, std::vector<int> > >(_recoveryTransformationsName);
-	_categories = node["categories"].as< std::vector<std::string> >(_categories);
+	mod->loadUnorderedNames(_type, _categories, node["categories"]);
 	_size = node["size"].as<double>(_size);
 	_costBuy = node["costBuy"].as<int>(_costBuy);
 	_costSell = node["costSell"].as<int>(_costSell);
 	_transferTime = node["transferTime"].as<int>(_transferTime);
 	_weight = node["weight"].as<int>(_weight);
+	_throwRange = node["throwRange"].as<int>(_throwRange);
+	_underwaterThrowRange = node["underwaterThrowRange"].as<int>(_underwaterThrowRange);
 
 	mod->loadSpriteOffset(_type, _bigSprite, node["bigSprite"], "BIGOBS.PCK");
 	mod->loadSpriteOffset(_type, _floorSprite, node["floorSprite"], "FLOOROB.PCK");
@@ -405,6 +425,7 @@ void RuleItem::load(const YAML::Node &node, Mod *mod, int listOrder, const ModSc
 			_dropoff = 1;
 			_confAimed.range = 0;
 			_accuracyMulti.setPsiAttack();
+			_targetMatrix = 6; // only hostile and neutral by default
 		}
 		else
 		{
@@ -536,7 +557,7 @@ void RuleItem::load(const YAML::Node &node, Mod *mod, int listOrder, const ModSc
 	{
 		if (n)
 		{
-			_compatibleAmmo[offset] = n["compatibleAmmo"].as<std::vector<std::string>>(_compatibleAmmo[offset]);
+			mod->loadUnorderedNames(_type, _compatibleAmmoNames[offset], n["compatibleAmmo"]);
 			_tuLoad[offset] = n["tuLoad"].as<int>(_tuLoad[offset]);
 			_tuUnload[offset] = n["tuUnload"].as<int>(_tuUnload[offset]);
 		}
@@ -555,7 +576,7 @@ void RuleItem::load(const YAML::Node &node, Mod *mod, int listOrder, const ModSc
 	{
 		for (RuleItemAction* conf : { &_confAimed, &_confAuto, &_confSnap, &_confMelee, })
 		{
-			if (conf->ammoSlot != RuleItem::AmmoSlotSelfUse && _compatibleAmmo[conf->ammoSlot].empty())
+			if (conf->ammoSlot != RuleItem::AmmoSlotSelfUse && _compatibleAmmoNames[conf->ammoSlot].empty())
 			{
 				throw Exception("Weapon " + _type + " has clip size 0 and no ammo defined. Please use 'clipSize: -1' for unlimited ammo, or allocate a compatibleAmmo item.");
 			}
@@ -570,7 +591,7 @@ void RuleItem::load(const YAML::Node &node, Mod *mod, int listOrder, const ModSc
 	_defaultInventorySlotName = node["defaultInventorySlot"].as<std::string>(_defaultInventorySlotName);
 	_defaultInvSlotX = node["defaultInvSlotX"].as<int>(_defaultInvSlotX);
 	_defaultInvSlotY = node["defaultInvSlotY"].as<int>(_defaultInvSlotY);
-	_supportedInventorySectionsNames = node["supportedInventorySections"].as< std::vector<std::string> >(_supportedInventorySectionsNames);
+	mod->loadUnorderedNames(_type, _supportedInventorySectionsNames, node["supportedInventorySections"]);
 	_isConsumable = node["isConsumable"].as<bool>(_isConsumable);
 	_isFireExtinguisher = node["isFireExtinguisher"].as<bool>(_isFireExtinguisher);
 	_isExplodingInHands = node["isExplodingInHands"].as<bool>(_isExplodingInHands);
@@ -630,13 +651,18 @@ void RuleItem::load(const YAML::Node &node, Mod *mod, int listOrder, const ModSc
 	_shotgunBehaviorType = node["shotgunBehavior"].as<int>(_shotgunBehaviorType);
 	_shotgunSpread = node["shotgunSpread"].as<int>(_shotgunSpread);
 	_shotgunChoke = node["shotgunChoke"].as<int>(_shotgunChoke);
-	_zombieUnitByArmorMale = node["zombieUnitByArmorMale"].as< std::map<std::string, std::string> >(_zombieUnitByArmorMale);
-	_zombieUnitByArmorFemale = node["zombieUnitByArmorFemale"].as< std::map<std::string, std::string> >(_zombieUnitByArmorFemale);
-	_zombieUnitByType = node["zombieUnitByType"].as< std::map<std::string, std::string> >(_zombieUnitByType);
+	mod->loadUnorderedNamesToNames(_type, _zombieUnitByArmorMale, node["zombieUnitByArmorMale"]);
+	mod->loadUnorderedNamesToNames(_type, _zombieUnitByArmorFemale, node["zombieUnitByArmorFemale"]);
+	mod->loadUnorderedNamesToNames(_type, _zombieUnitByType, node["zombieUnitByType"]);
 	_zombieUnit = node["zombieUnit"].as<std::string>(_zombieUnit);
 	_spawnUnit = node["spawnUnit"].as<std::string>(_spawnUnit);
 	_spawnUnitFaction = node["spawnUnitFaction"].as<int>(_spawnUnitFaction);
-	_psiTargetMatrix = node["psiTargetMatrix"].as<int>(_psiTargetMatrix);
+	if (node["psiTargetMatrix"])
+	{
+		// TODO: just backwards-compatibility, remove in 2022, update ruleset validator too
+		_targetMatrix = node["psiTargetMatrix"].as<int>(_targetMatrix);
+	}
+	_targetMatrix = node["targetMatrix"].as<int>(_targetMatrix);
 	_LOSRequired = node["LOSRequired"].as<bool>(_LOSRequired);
 	_meleePower = node["meleePower"].as<int>(_meleePower);
 	_underwaterOnly = node["underwaterOnly"].as<bool>(_underwaterOnly);
@@ -645,6 +671,9 @@ void RuleItem::load(const YAML::Node &node, Mod *mod, int listOrder, const ModSc
 	_vaporColor = node["vaporColor"].as<int>(_vaporColor);
 	_vaporDensity = node["vaporDensity"].as<int>(_vaporDensity);
 	_vaporProbability = node["vaporProbability"].as<int>(_vaporProbability);
+	_vaporColorSurface = node["vaporColorSurface"].as<int>(_vaporColorSurface);
+	_vaporDensitySurface = node["vaporDensitySurface"].as<int>(_vaporDensitySurface);
+	_vaporProbabilitySurface = node["vaporProbabilitySurface"].as<int>(_vaporProbabilitySurface);
 	mod->loadSpriteOffset(_type, _customItemPreviewIndex, node["customItemPreviewIndex"], "CustomItemPreviews");
 	_kneelBonus = node["kneelBonus"].as<int>(_kneelBonus);
 	_oneHandedPenalty = node["oneHandedPenalty"].as<int>(_oneHandedPenalty);
@@ -707,22 +736,41 @@ void RuleItem::afterLoad(const Mod* mod)
 		}
 	}
 
-	_defaultInventorySlot = mod->getInventory(_defaultInventorySlotName, true);
+	mod->linkRule(_defaultInventorySlot, _defaultInventorySlotName);
 	if (_supportedInventorySectionsNames.size())
 	{
-		_supportedInventorySections.reserve(_supportedInventorySectionsNames.size());
-		for (auto& n : _supportedInventorySectionsNames)
-		{
-			_supportedInventorySections.push_back(mod->getInventory(n, true));
-		}
+		mod->linkRule(_supportedInventorySections, _supportedInventorySectionsNames);
 		Collections::sortVector(_supportedInventorySections);
+	}
+	for (int i = 0; i < AmmoSlotMax; ++i)
+	{
+		mod->linkRule(_compatibleAmmo[i], _compatibleAmmoNames[i]);
+		Collections::sortVector(_compatibleAmmo[i]);
+	}
+	if (_vehicleUnit)
+	{
+		if (_compatibleAmmo[0].size() > 1)
+		{
+			throw Exception("Vehicle weapons support only one ammo type");
+		}
+		if (_compatibleAmmo[0].size() == 1)
+		{
+			auto ammo = _compatibleAmmo[0][0];
+			if (ammo->getClipSize() > 0 && getClipSize() > 0)
+			{
+				if (getClipSize() % ammo->getClipSize())
+				{
+					throw Exception("Vehicle weapon clip size is not a multiple of '" + ammo->getType() +  "' clip size");
+				}
+			}
+		}
 	}
 
 	//remove not needed data
 	Collections::removeAll(_requiresName);
 	Collections::removeAll(_requiresBuyName);
 	Collections::removeAll(_recoveryTransformationsName);
-	Collections::removeAll(_supportedInventorySectionsNames);
+	Collections::removeAll(_compatibleAmmoNames);
 }
 
 /**
@@ -1420,10 +1468,63 @@ int RuleItem::getTUUnload(int slot) const
 }
 
 /**
+ * Gets the ammo type for a vehicle.
+ */
+const RuleItem* RuleItem::getVehicleClipAmmo() const
+{
+	return _compatibleAmmo[0].empty() ? nullptr : _compatibleAmmo[0].front();
+}
+
+/**
+ * Gets the maximum number of rounds for a vehicle. E.g. a vehicle that can load 6 clips with 10 rounds each, returns 60.
+ */
+int RuleItem::getVehicleClipSize() const
+{
+	auto ammo = getVehicleClipAmmo();
+	if (ammo)
+	{
+		if (ammo->getClipSize() > 0 && getClipSize() > 0)
+		{
+			return getClipSize();
+		}
+		else
+		{
+			return ammo->getClipSize();
+		}
+	}
+	else
+	{
+		return getClipSize();
+	}
+}
+
+/**
+ * Gets the number of clips needed to fully load a vehicle. E.g. a vehicle that holds max 60 rounds and clip size is 10, returns 6.
+ */
+int RuleItem::getVehicleClipsLoaded() const
+{
+	auto ammo = getVehicleClipAmmo();
+	if (ammo)
+	{
+		if (ammo->getClipSize() > 0 && getClipSize() > 0)
+		{
+			return getClipSize() / ammo->getClipSize();
+		}
+		else
+		{
+			return ammo->getClipSize();
+		}
+	}
+	else
+	{
+		return 0;
+	}
+}
+/**
  * Gets a list of compatible ammo.
  * @return Pointer to a list of compatible ammo.
  */
-const std::vector<std::string> *RuleItem::getPrimaryCompatibleAmmo() const
+const std::vector<const RuleItem*> *RuleItem::getPrimaryCompatibleAmmo() const
 {
 	return &_compatibleAmmo[0];
 }
@@ -1433,16 +1534,13 @@ const std::vector<std::string> *RuleItem::getPrimaryCompatibleAmmo() const
  * @param type Type of ammo item.
  * @return Slot position.
  */
-int RuleItem::getSlotForAmmo(const std::string& type) const
+int RuleItem::getSlotForAmmo(const RuleItem* type) const
 {
 	for (int i = 0; i < AmmoSlotMax; ++i)
 	{
-		for (const auto& t : _compatibleAmmo[i])
+		if (Collections::sortVectorHave(_compatibleAmmo[i], type))
 		{
-			if (t == type)
-			{
-				return i;
-			}
+			return i;
 		}
 	}
 	return -1;
@@ -1451,7 +1549,7 @@ int RuleItem::getSlotForAmmo(const std::string& type) const
 /**
  *  Get slot position for ammo type.
  */
-const std::vector<std::string> *RuleItem::getCompatibleAmmoForSlot(int slot) const
+const std::vector<const RuleItem*> *RuleItem::getCompatibleAmmoForSlot(int slot) const
 {
 	return &_compatibleAmmo[slot];
 }
@@ -1834,7 +1932,7 @@ bool RuleItem::isCorpseRecoverable() const
 {
 	// Explanation:
 	// Since the "recover" flag applies to both live body (prisoner capture) and dead body (corpse recovery) in OXC,
-	// OXCE+ adds this new flag to allow recovery of a live body, but disable recovery of the corpse
+	// OXCE adds this new flag to allow recovery of a live body, but disable recovery of the corpse
 	// (used in mods mostly to ignore dead bodies of killed humans)
 	return _recoverCorpse;
 }
@@ -2233,24 +2331,26 @@ int RuleItem::getMeleePower() const
 }
 
 /**
- * Checks the psiamp's allowed targets.
+ * Checks if this item can be used to target a given faction.
+ * Usage #1: checks the psiamp's allowed targets.
  * - Not used in AI.
  * - Mind control of the same faction is hardcoded disabled.
+ * Usage #2: checks if a death trap item applies to a given faction.
  * @return True if allowed, false otherwise.
  */
-bool RuleItem::isPsiTargetAllowed(UnitFaction targetFaction) const
+bool RuleItem::isTargetAllowed(UnitFaction targetFaction) const
 {
 	if (targetFaction == FACTION_PLAYER)
 	{
-		return _psiTargetMatrix & 1;
+		return _targetMatrix & 1;
 	}
 	else if (targetFaction == FACTION_HOSTILE)
 	{
-		return _psiTargetMatrix & 2;
+		return _targetMatrix & 2;
 	}
 	else if (targetFaction == FACTION_NEUTRAL)
 	{
-		return _psiTargetMatrix & 4;
+		return _targetMatrix & 4;
 	}
 	return false;
 }
@@ -2374,28 +2474,40 @@ int RuleItem::getSpecialType() const
 
 /**
  * Gets the color offset to use for the vapor trail.
+ * @param depth battlescape depth (0=surface, 1-3=underwater)
  * @return the color offset.
  */
-int RuleItem::getVaporColor() const
+int RuleItem::getVaporColor(int depth) const
 {
+	if (depth == 0)
+		return _vaporColorSurface;
+
 	return _vaporColor;
 }
 
 /**
  * Gets the vapor cloud density for the vapor trail.
+ * @param depth battlescape depth (0=surface, 1-3=underwater)
  * @return the vapor density.
  */
-int RuleItem::getVaporDensity() const
+int RuleItem::getVaporDensity(int depth) const
 {
+	if (depth == 0)
+		return _vaporDensitySurface;
+
 	return _vaporDensity;
 }
 
 /**
  * Gets the vapor cloud probability for the vapor trail.
+ * @param depth battlescape depth (0=surface, 1-3=underwater)
  * @return the vapor probability.
  */
-int RuleItem::getVaporProbability() const
+int RuleItem::getVaporProbability(int depth) const
 {
+	if (depth == 0)
+		return _vaporProbabilitySurface;
+
 	return _vaporProbability;
 }
 
@@ -2497,6 +2609,73 @@ void isSingleTargetScript(const RuleItem* r, int &ret)
 	}
 }
 
+void hasCategoryScript(const RuleItem* ri, int& val, const std::string& cat)
+{
+	if (ri)
+	{
+		auto it = std::find(ri->getCategories().begin(), ri->getCategories().end(), cat);
+		if (it != ri->getCategories().end())
+		{
+			val = 1;
+			return;
+		}
+	}
+	val = 0;
+}
+
+void getResistTypeScript(const RuleDamageType* rdt, int &ret)
+{
+	ret = rdt ? rdt->ResistType : 0;
+}
+
+void getAoeScript(const RuleDamageType* rdt, int &ret)
+{
+	ret = rdt ? !rdt->isDirect() : 0;
+}
+
+void getRandomTypeScript(const RuleDamageType* rdt, int &ret)
+{
+	ret = rdt ? rdt->RandomType : 0;
+}
+
+template<float RuleDamageType::* Ptr>
+void getDamageToScript(const RuleDamageType* rdt, int &ret, int value)
+{
+	ret = rdt ? (rdt->* Ptr) * value : 0;
+}
+
+void getRandomDamageScript(const RuleDamageType* rdt, int &ret, int value, RNG::RandomState* rng)
+{
+	ret = 0;
+	if (rdt && rng)
+	{
+		auto func = [&](int min, int max)
+		{
+			return rng->generate(min, max);
+		};
+		ret = rdt->getRandomDamage(value, &func);
+	}
+}
+
+std::string debugDisplayScript(const RuleDamageType* rdt)
+{
+	if (rdt)
+	{
+		std::string s;
+		s += "RuleDamageType";
+		s += "(resist: ";
+		s += std::to_string((int)rdt->ResistType);
+		s += " random: ";
+		s += std::to_string((int)rdt->RandomType);
+		s += ")";
+		return s;
+	}
+	else
+	{
+		return "null";
+	}
+}
+
 std::string debugDisplayScript(const RuleItem* ri)
 {
 	if (ri)
@@ -2523,6 +2702,34 @@ std::string debugDisplayScript(const RuleItem* ri)
  */
 void RuleItem::ScriptRegister(ScriptParserBase* parser)
 {
+	{
+		const auto name = std::string{ "RuleDamageType" };
+		parser->registerRawPointerType<RuleDamageType>(name);
+		Bind<RuleDamageType> rs = { parser, name };
+
+		rs.add<&RuleDamageType::isDirect>("isDirect", "if this damage type affects only one target");
+		rs.add<&getAoeScript>("isAreaOfEffect", "if this damage type can affect multiple targets");
+
+		rs.add<&getResistTypeScript>("getResistType", "which damage resistance type is used for damage reduction");
+		rs.add<&getRandomTypeScript>("getRandomType", "how to calculate randomized weapon damage from the weapon's power");
+
+		rs.add<&getDamageToScript<&RuleDamageType::ToArmorPre>>("getDamageToArmorPre", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToArmor>>("getDamageToArmor", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToEnergy>>("getDamageToEnergy", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToHealth>>("getDamageToHealth", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToItem>>("getDamageToItem", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToMana>>("getDamageToMana", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToMorale>>("getDamageToMorale", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToStun>>("getDamageToStun", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToTile>>("getDamageToTile", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToTime>>("getDamageToTime", "calculated damage value multiplied by the corresponding modifier");
+		rs.add<&getDamageToScript<&RuleDamageType::ToWound>>("getDamageToWound", "calculated damage value multiplied by the corresponding modifier");
+
+		rs.add<&getRandomDamageScript>("getRandomDamage", "calculated damage value (based on weapon's power)");
+
+		rs.addDebugDisplay<&debugDisplayScript>();
+	}
+
 	parser->registerPointerType<Mod>();
 
 	Bind<RuleItem> ri = { parser };
@@ -2551,6 +2758,11 @@ void RuleItem::ScriptRegister(ScriptParserBase* parser)
 	ri.add<&RuleItem::getAccuracyThrow>("getAccuracyThrow");
 	ri.add<&RuleItem::getAccuracyUse>("getAccuracyUse");
 
+	ri.add<&RuleItem::getPower>("getPower", "primary power, before applying unit bonuses, random rolls or other modifiers");
+	ri.add<&RuleItem::getDamageType>("getDamageType", "primary damage type");
+	ri.add<&RuleItem::getMeleePower>("getMeleePower", "secondary power (gunbutt), before applying unit bonuses, random rolls or other modifiers");
+	ri.add<&RuleItem::getMeleeType>("getMeleeDamageType", "secondary damage type (gunbutt)");
+
 	ri.add<&RuleItem::getArmor>("getArmorValue");
 	ri.add<&RuleItem::getWeight>("getWeight");
 	ri.add<&getBattleTypeScript>("getBattleType");
@@ -2559,6 +2771,7 @@ void RuleItem::ScriptRegister(ScriptParserBase* parser)
 	ri.add<&RuleItem::isTwoHanded>("isTwoHanded");
 	ri.add<&RuleItem::isBlockingBothHands>("isBlockingBothHands");
 	ri.add<&isSingleTargetScript>("isSingleTarget");
+	ri.add<&hasCategoryScript>("hasCategory");
 
 	ri.addScriptValue<BindBase::OnlyGet, &RuleItem::_scriptValues>();
 	ri.addDebugDisplay<&debugDisplayScript>();

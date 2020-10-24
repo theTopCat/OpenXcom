@@ -2106,7 +2106,7 @@ bool SavedGame::isFacilityBuilt(const std::string &facilityType) const
 	{
 		for (auto fac : *base->getFacilities())
 		{
-			if (fac->getRules()->getType() == facilityType)
+			if (fac->getBuildTime() == 0 && fac->getRules()->getType() == facilityType)
 			{
 				return true;
 			}
@@ -2524,6 +2524,7 @@ Region *SavedGame::locateRegion(double lon, double lat) const
 	{
 		return *found;
 	}
+	Log(LOG_ERROR) << "Failed to find a region at location [" << lon << ", " << lat << "].";
 	return 0;
 }
 

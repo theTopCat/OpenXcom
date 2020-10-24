@@ -17,9 +17,11 @@
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "Armor.h"
+#include "Unit.h"
 #include "../Engine/ScriptBind.h"
 #include "Mod.h"
 #include "RuleSoldier.h"
+#include "../Savegame/BattleUnit.h"
 
 namespace OpenXcom
 {
@@ -59,17 +61,17 @@ const std::string Armor::NONE = "STR_NONE";
  * @param type String defining the type.
  */
 Armor::Armor(const std::string &type) :
-	_type(type), _frontArmor(0), _sideArmor(0), _leftArmorDiff(0), _rearArmor(0), _underArmor(0),
-	_drawingRoutine(0), _drawBubbles(false), _movementType(MT_WALK), _moveSound(-1), _size(1), _weight(0),
+	_type(type), _infiniteSupply(false), _frontArmor(0), _sideArmor(0), _leftArmorDiff(0), _rearArmor(0), _underArmor(0),
+	_drawingRoutine(0), _drawBubbles(false), _movementType(MT_WALK), _turnBeforeFirstStep(false), _turnCost(1), _moveSound(-1), _size(1), _weight(0),
 	_visibilityAtDark(0), _visibilityAtDay(0), _personalLight(15),
-	_camouflageAtDay(0), _camouflageAtDark(0), _antiCamouflageAtDay(0), _antiCamouflageAtDark(0), _heatVision(0), _psiVision(0),
+	_camouflageAtDay(0), _camouflageAtDark(0), _antiCamouflageAtDay(0), _antiCamouflageAtDark(0), _heatVision(0), _psiVision(0), _psiCamouflage(0),
 	_deathFrames(3), _constantAnimation(false), _canHoldWeapon(false), _hasInventory(true), _forcedTorso(TORSO_USE_GENDER),
 	_faceColorGroup(0), _hairColorGroup(0), _utileColorGroup(0), _rankColorGroup(0),
 	_fearImmune(defTriBool), _bleedImmune(defTriBool), _painImmune(defTriBool), _zombiImmune(defTriBool),
 	_ignoresMeleeThreat(defTriBool), _createsMeleeThreat(defTriBool),
 	_overKill(0.5f), _meleeDodgeBackPenalty(0),
 	_allowsRunning(defTriBool), _allowsStrafing(defTriBool), _allowsKneeling(defTriBool), _allowsMoving(1),
-	_instantWoundRecovery(false),
+	_allowTwoMainWeapons(false), _instantWoundRecovery(false),
 	_standHeight(-1), _kneelHeight(-1), _floatHeight(-1)
 {
 	for (int i=0; i < DAMAGE_TYPES; i++)
@@ -107,20 +109,20 @@ void Armor::load(const YAML::Node &node, const ModScript &parsers, Mod *mod)
 	_hasInventory = node["allowInv"].as<bool>(_hasInventory);
 	if (node["corpseItem"])
 	{
-		_corpseBattle.clear();
-		_corpseBattle.push_back(node["corpseItem"].as<std::string>());
-		_corpseGeo = _corpseBattle[0];
+		_corpseBattleNames.clear();
+		_corpseBattleNames.push_back(node["corpseItem"].as<std::string>());
+		_corpseGeoName = _corpseBattleNames[0];
 	}
 	else if (node["corpseBattle"])
 	{
-		_corpseBattle = node["corpseBattle"].as< std::vector<std::string> >();
-		_corpseGeo = _corpseBattle[0];
+		mod->loadNames(_type, _corpseBattleNames, node["corpseBattle"]);
+		_corpseGeoName = _corpseBattleNames.at(0);
 	}
-	_builtInWeapons = node["builtInWeapons"].as<std::vector<std::string> >(_builtInWeapons);
-	_corpseGeo = node["corpseGeo"].as<std::string>(_corpseGeo);
-	_storeItem = node["storeItem"].as<std::string>(_storeItem);
-	_specWeapon = node["specialWeapon"].as<std::string>(_specWeapon);
-	_requires = node["requires"].as<std::string>(_requires);
+	mod->loadNames(_type, _builtInWeaponsNames, node["builtInWeapons"]);
+	_corpseGeoName = node["corpseGeo"].as<std::string>(_corpseGeoName);
+	_storeItemName = node["storeItem"].as<std::string>(_storeItemName);
+	_specWeaponName = node["specialWeapon"].as<std::string>(_specWeaponName);
+	_requiresName = node["requires"].as<std::string>(_requiresName);
 
 	_layersDefaultPrefix = node["layersDefaultPrefix"].as<std::string>(_layersDefaultPrefix);
 	_layersSpecificPrefix = node["layersSpecificPrefix"].as< std::map<int, std::string> >(_layersSpecificPrefix);
@@ -134,6 +136,9 @@ void Armor::load(const YAML::Node &node, const ModScript &parsers, Mod *mod)
 	_drawingRoutine = node["drawingRoutine"].as<int>(_drawingRoutine);
 	_drawBubbles = node["drawBubbles"].as<bool>(_drawBubbles);
 	_movementType = (MovementType)node["movementType"].as<int>(_movementType);
+
+	_turnBeforeFirstStep = node["turnBeforeFirstStep"].as<bool>(_turnBeforeFirstStep);
+	_turnCost = node["turnCost"].as<int>(_turnCost);
 
 	mod->loadSoundOffset(_type, _moveSound, node["moveSound"], "BATTLE.CAT");
 	mod->loadSoundOffset(_type, _deathSoundMale, node["deathMale"], "BATTLE.CAT");
@@ -158,6 +163,7 @@ void Armor::load(const YAML::Node &node, const ModScript &parsers, Mod *mod)
 	_antiCamouflageAtDark = node["antiCamouflageAtDark"].as<int>(_antiCamouflageAtDark);
 	_heatVision = node["heatVision"].as<int>(_heatVision);
 	_psiVision = node["psiVision"].as<int>(_psiVision);
+	_psiCamouflage = node["psiCamouflage"].as<int>(_psiCamouflage);
 	_stats.merge(node["stats"].as<UnitStats>(_stats));
 	if (const YAML::Node &dmg = node["damageModifier"])
 	{
@@ -166,7 +172,7 @@ void Armor::load(const YAML::Node &node, const ModScript &parsers, Mod *mod)
 			_damageModifier[i] = dmg[i].as<float>();
 		}
 	}
-	_loftempsSet = node["loftempsSet"].as< std::vector<int> >(_loftempsSet);
+	mod->loadInts(_type, _loftempsSet, node["loftempsSet"]);
 	if (node["loftemps"])
 		_loftempsSet.push_back(node["loftemps"].as<int>());
 	_deathFrames = node["deathFrames"].as<int>(_deathFrames);
@@ -226,25 +232,72 @@ void Armor::load(const YAML::Node &node, const ModScript &parsers, Mod *mod)
 	_hairColorGroup = node["spriteHairGroup"].as<int>(_hairColorGroup);
 	_rankColorGroup = node["spriteRankGroup"].as<int>(_rankColorGroup);
 	_utileColorGroup = node["spriteUtileGroup"].as<int>(_utileColorGroup);
-	_faceColor = node["spriteFaceColor"].as<std::vector<int> >(_faceColor);
-	_hairColor = node["spriteHairColor"].as<std::vector<int> >(_hairColor);
-	_rankColor = node["spriteRankColor"].as<std::vector<int> >(_rankColor);
-	_utileColor = node["spriteUtileColor"].as<std::vector<int> >(_utileColor);
+	mod->loadInts(_type, _faceColor, node["spriteFaceColor"]);
+	mod->loadInts(_type, _hairColor, node["spriteHairColor"]);
+	mod->loadInts(_type, _rankColor, node["spriteRankColor"]);
+	mod->loadInts(_type, _utileColor, node["spriteUtileColor"]);
 
 	_battleUnitScripts.load(_type, node, parsers.battleUnitScripts);
 
-	_units = node["units"].as< std::vector<std::string> >(_units);
+	mod->loadUnorderedNames(_type, _unitsNames, node["units"]);
 	_scriptValues.load(node, parsers.getShared());
 	mod->loadSpriteOffset(_type, _customArmorPreviewIndex, node["customArmorPreviewIndex"], "CustomArmorPreviews");
 	loadTriBoolHelper(_allowsRunning, node["allowsRunning"]);
 	loadTriBoolHelper(_allowsStrafing, node["allowsStrafing"]);
 	loadTriBoolHelper(_allowsKneeling, node["allowsKneeling"]);
 	_allowsMoving = node["allowsMoving"].as<bool>(_allowsMoving);
+	_allowTwoMainWeapons = node["allowTwoMainWeapons"].as<bool>(_allowTwoMainWeapons);
 	_instantWoundRecovery = node["instantWoundRecovery"].as<bool>(_instantWoundRecovery);
 	_standHeight = node["standHeight"].as<int>(_standHeight);
 	_kneelHeight = node["kneelHeight"].as<int>(_kneelHeight);
 	_floatHeight = node["floatHeight"].as<int>(_floatHeight);
 }
+
+/**
+ * Cross link with other rules.
+ */
+void Armor::afterLoad(const Mod* mod)
+{
+	mod->linkRule(_corpseBattle, _corpseBattleNames);
+	mod->linkRule(_corpseGeo, _corpseGeoName);
+	mod->linkRule(_builtInWeapons, _builtInWeaponsNames);
+	mod->linkRule(_units, _unitsNames);
+	mod->linkRule(_requires, _requiresName);
+	if (_storeItemName == Armor::NONE)
+	{
+		_infiniteSupply = true;
+	}
+	mod->linkRule(_storeItem, _storeItemName); //special logic there: "STR_NONE" -> nullptr
+	mod->linkRule(_specWeapon, _specWeaponName);
+
+
+	if (_corpseBattle.size() != (size_t)getTotalSize())
+	{
+		if (_corpseBattle.size() != 0)
+		{
+			throw Exception("Number of battle corpse items does not match the armor size.");
+		}
+		else
+		{
+			throw Exception("Missing battle corpse item(s).");
+		}
+	}
+	for (auto& c : _corpseBattle)
+	{
+		if (!c)
+		{
+			throw Exception("Battle corpse item(s) cannot be empty.");
+		}
+	}
+	if (!_corpseGeo)
+	{
+		throw Exception("Geo corpse item cannot be empty.");
+	}
+
+	Collections::sortVector(_units);
+}
+
+
 
 /**
  * Returns the language string that names
@@ -342,7 +395,7 @@ int Armor::getArmor(UnitSide side) const
  * Gets the corpse item used in the Geoscape.
  * @return The name of the corpse item.
  */
-std::string Armor::getCorpseGeoscape() const
+const RuleItem* Armor::getCorpseGeoscape() const
 {
 	return _corpseGeo;
 }
@@ -352,7 +405,7 @@ std::string Armor::getCorpseGeoscape() const
  * in the Battlescape (one per unit tile).
  * @return The list of corpse items.
  */
-const std::vector<std::string> &Armor::getCorpseBattlescape() const
+const std::vector<const RuleItem*> &Armor::getCorpseBattlescape() const
 {
 	return _corpseBattle;
 }
@@ -362,7 +415,7 @@ const std::vector<std::string> &Armor::getCorpseBattlescape() const
  * Every soldier armor needs an item.
  * @return The name of the store item (STR_NONE for infinite armor).
  */
-std::string Armor::getStoreItem() const
+const RuleItem* Armor::getStoreItem() const
 {
 	return _storeItem;
 }
@@ -371,7 +424,7 @@ std::string Armor::getStoreItem() const
  * Gets the type of special weapon.
  * @return The name of the special weapon.
  */
-std::string Armor::getSpecialWeapon() const
+const RuleItem* Armor::getSpecialWeapon() const
 {
 	return _specWeapon;
 }
@@ -380,7 +433,7 @@ std::string Armor::getSpecialWeapon() const
  * Gets the research required to be able to equip this armor.
  * @return The name of the research topic.
  */
-const std::string &Armor::getRequiredResearch() const
+const RuleResearch* Armor::getRequiredResearch() const
 {
 	return _requires;
 }
@@ -604,7 +657,7 @@ ForcedTorso Armor::getForcedTorso() const
  * any loadout or living weapon item that may be defined.
  * @return list of weapons that are integral to this armor.
  */
-const std::vector<std::string> &Armor::getBuiltInWeapons() const
+const std::vector<const RuleItem*> &Armor::getBuiltInWeapons() const
 {
 	return _builtInWeapons;
 }
@@ -679,6 +732,15 @@ int Armor::getHeatVision() const
 int Armor::getPsiVision() const
 {
 	return _psiVision;
+}
+
+/**
+ * Gets info about psi camouflage.
+ * @return psi camo data.
+ */
+int Armor::getPsiCamouflage() const
+{
+	return _psiCamouflage;
 }
 
 /**
@@ -871,9 +933,17 @@ bool Armor::hasInventory() const
 * Gets the list of units this armor applies to.
 * @return The list of unit IDs (empty = applies to all).
 */
-const std::vector<std::string> &Armor::getUnits() const
+const std::vector<const RuleSoldier*> &Armor::getUnits() const
 {
 	return _units;
+}
+
+/**
+ * Check if a soldier can use this armor.
+ */
+bool Armor::getCanBeUsedBy(const RuleSoldier* soldier) const
+{
+	return _units.empty() || Collections::sortVectorHave(_units, soldier);
 }
 
 /**

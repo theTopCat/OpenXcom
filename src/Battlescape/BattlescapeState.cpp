@@ -75,6 +75,7 @@
 #include "../Savegame/BattleUnit.h"
 #include "../Savegame/Soldier.h"
 #include "../Savegame/BattleItem.h"
+#include "../Savegame/HitLog.h"
 #include "../Ufopaedia/Ufopaedia.h"
 #include "../Savegame/Ufo.h"
 #include "../Mod/RuleEnviroEffects.h"
@@ -476,6 +477,7 @@ BattlescapeState::BattlescapeState() :
 	_btnStats->onMouseOut((ActionHandler)&BattlescapeState::txtTooltipOut);
 
 	_btnLeftHandItem->onMouseClick((ActionHandler)&BattlescapeState::btnLeftHandItemClick);
+	_btnLeftHandItem->onMouseClick((ActionHandler)&BattlescapeState::btnLeftHandItemClick, SDL_BUTTON_RIGHT);
 	_btnLeftHandItem->onMouseClick((ActionHandler)&BattlescapeState::btnLeftHandItemClick, SDL_BUTTON_MIDDLE);
 	_btnLeftHandItem->onKeyboardPress((ActionHandler)&BattlescapeState::btnLeftHandItemClick, Options::keyBattleUseLeftHand);
 	_btnLeftHandItem->setTooltip("STR_USE_LEFT_HAND");
@@ -483,6 +485,7 @@ BattlescapeState::BattlescapeState() :
 	_btnLeftHandItem->onMouseOut((ActionHandler)&BattlescapeState::txtTooltipOut);
 
 	_btnRightHandItem->onMouseClick((ActionHandler)&BattlescapeState::btnRightHandItemClick);
+	_btnRightHandItem->onMouseClick((ActionHandler)&BattlescapeState::btnRightHandItemClick, SDL_BUTTON_RIGHT);
 	_btnRightHandItem->onMouseClick((ActionHandler)&BattlescapeState::btnRightHandItemClick, SDL_BUTTON_MIDDLE);
 	_btnRightHandItem->onKeyboardPress((ActionHandler)&BattlescapeState::btnRightHandItemClick, Options::keyBattleUseRightHand);
 	_btnRightHandItem->setTooltip("STR_USE_RIGHT_HAND");
@@ -537,7 +540,7 @@ BattlescapeState::BattlescapeState() :
 	if (_save->getGlobalShade() > Options::oxceAutoNightVisionThreshold)
 	{
 		// turn personal lights off
-		_save->getTileEngine()->togglePersonalLighting();
+		//_save->getTileEngine()->togglePersonalLighting();
 		// turn night vision on
 		_map->toggleNightVision();
 	}
@@ -1365,6 +1368,14 @@ void BattlescapeState::btnLeftHandItemClick(Action *action)
 
 		_save->getSelectedUnit()->setActiveLeftHand();
 		_map->draw();
+
+		bool rightClick = action->getDetails()->button.button == SDL_BUTTON_RIGHT;
+		if (rightClick)
+		{
+			_save->getSelectedUnit()->toggleLeftHandForReactions();
+			return;
+		}
+
 		BattleItem *leftHandItem = _save->getSelectedUnit()->getLeftHandWeapon();
 		if (!leftHandItem)
 		{
@@ -1405,6 +1416,14 @@ void BattlescapeState::btnRightHandItemClick(Action *action)
 
 		_save->getSelectedUnit()->setActiveRightHand();
 		_map->draw();
+
+		bool rightClick = action->getDetails()->button.button == SDL_BUTTON_RIGHT;
+		if (rightClick)
+		{
+			_save->getSelectedUnit()->toggleRightHandForReactions();
+			return;
+		}
+
 		BattleItem *rightHandItem = _save->getSelectedUnit()->getRightHandWeapon();
 		if (!rightHandItem)
 		{
@@ -1646,7 +1665,7 @@ bool BattlescapeState::playableUnitSelected()
 /**
  * Draw hand item with ammo number.
  */
-void BattlescapeState::drawItem(BattleItem* item, Surface* hand, std::vector<NumberText*> &ammoText, std::vector<NumberText*> &medikitText, NumberText *twoHandedText)
+void BattlescapeState::drawItem(BattleItem* item, Surface* hand, std::vector<NumberText*> &ammoText, std::vector<NumberText*> &medikitText, NumberText *twoHandedText, bool drawReactionIndicator)
 {
 	hand->clear();
 	for (int slot = 0; slot < RuleItem::AmmoSlotMax; ++slot)
@@ -1711,6 +1730,18 @@ void BattlescapeState::drawItem(BattleItem* item, Surface* hand, std::vector<Num
 			tempSurface->blitNShade(hand, x, y, Pulsate[_save->getAnimFrame() % 8], false, item->isFuseEnabled() ? 0 : 32);
 		}
 	}
+	if (drawReactionIndicator)
+	{
+ 		if (Surface* reactionIndicator = _game->getMod()->getSurface("reactionIndicator", false))
+		{
+			reactionIndicator->blitNShade(hand, 0, 0);
+		}
+		else
+		{
+			Surface* tempSurface = _game->getMod()->getSurfaceSet("SCANG.DAT")->getFrame(0);
+			tempSurface->blitNShade(hand, 28, 0);
+		}
+	}
 }
 
 /**
@@ -1719,8 +1750,10 @@ void BattlescapeState::drawItem(BattleItem* item, Surface* hand, std::vector<Num
 void BattlescapeState::drawHandsItems()
 {
 	BattleUnit *battleUnit = playableUnitSelected() ? _save->getSelectedUnit() : nullptr;
-	drawItem(battleUnit ? battleUnit->getLeftHandWeapon() : nullptr, _btnLeftHandItem, _numAmmoLeft, _numMedikitLeft, _numTwoHandedIndicatorLeft);
-	drawItem(battleUnit ? battleUnit->getRightHandWeapon() : nullptr, _btnRightHandItem, _numAmmoRight, _numMedikitRight, _numTwoHandedIndicatorRight);
+	bool left = battleUnit ? battleUnit->isLeftHandPreferredForReactions() : false;
+	bool right = battleUnit ? battleUnit->isRightHandPreferredForReactions() : false;
+	drawItem(battleUnit ? battleUnit->getLeftHandWeapon() : nullptr, _btnLeftHandItem, _numAmmoLeft, _numMedikitLeft, _numTwoHandedIndicatorLeft, left);
+	drawItem(battleUnit ? battleUnit->getRightHandWeapon() : nullptr, _btnRightHandItem, _numAmmoRight, _numMedikitRight, _numTwoHandedIndicatorRight, right);
 }
 
 /**
@@ -1943,7 +1976,7 @@ void BattlescapeState::updateSoldierInfo(bool checkFOV)
 		// go through all wounded units under player's control (incl. unconscious)
 		for (std::vector<BattleUnit*>::iterator i = _battleGame->getSave()->getUnits()->begin(); i != _battleGame->getSave()->getUnits()->end() && j < VISIBLE_MAX; ++i)
 		{
-			if ((*i)->getFaction() == FACTION_PLAYER && (*i)->getStatus() != STATUS_DEAD && (*i)->getStatus() != STATUS_IGNORE_ME && (*i)->getFatalWounds() > 0)
+			if ((*i)->getFaction() == FACTION_PLAYER && (*i)->getStatus() != STATUS_DEAD && (*i)->getStatus() != STATUS_IGNORE_ME && (*i)->getFatalWounds() > 0 && (*i)->indicatorsAreEnabled())
 			{
 				_btnVisibleUnit[j]->setTooltip(_txtVisibleUnitTooltip[VISIBLE_MAX]);
 				_btnVisibleUnit[j]->setVisible(true);
@@ -1961,7 +1994,7 @@ void BattlescapeState::updateSoldierInfo(bool checkFOV)
 		// first show all stunned allies with negative health regen (usually caused by high stun level)
 		for (std::vector<BattleUnit*>::iterator i = _battleGame->getSave()->getUnits()->begin(); i != _battleGame->getSave()->getUnits()->end() && j < VISIBLE_MAX; ++i)
 		{
-			if ((*i)->getOriginalFaction() == FACTION_PLAYER && (*i)->getStatus() == STATUS_UNCONSCIOUS && (*i)->hasNegativeHealthRegen())
+			if ((*i)->getOriginalFaction() == FACTION_PLAYER && (*i)->getStatus() == STATUS_UNCONSCIOUS && (*i)->hasNegativeHealthRegen() && (*i)->indicatorsAreEnabled())
 			{
 				_btnVisibleUnit[j]->setTooltip(_txtVisibleUnitTooltip[VISIBLE_MAX + 1]);
 				_btnVisibleUnit[j]->setVisible(true);
@@ -1974,7 +2007,7 @@ void BattlescapeState::updateSoldierInfo(bool checkFOV)
 		// then show all standing units under player's control with high stun level
 		for (std::vector<BattleUnit*>::iterator i = _battleGame->getSave()->getUnits()->begin(); i != _battleGame->getSave()->getUnits()->end() && j < VISIBLE_MAX; ++i)
 		{
-			if ((*i)->getFaction() == FACTION_PLAYER && !((*i)->isOut()) && (*i)->getHealth() > 0)
+			if ((*i)->getFaction() == FACTION_PLAYER && !((*i)->isOut()) && (*i)->getHealth() > 0 && (*i)->indicatorsAreEnabled())
 			{
 				if ((*i)->getStunlevel() * 100 / (*i)->getHealth() >= 75)
 				{
@@ -2091,9 +2124,9 @@ void BattlescapeState::blinkHealthBar()
 
 	if (++color > maxcolor) color = maxcolor - 3;
 
-	for (int i = 0; i < 6; i++)
+	for (int i = 0; i < BODYPART_MAX; i++)
 	{
-		if (bu->getFatalWound(i) > 0)
+		if (bu->getFatalWound((UnitBodyPart)i) > 0)
 		{
 			_barHealth->setColor(_barHealthColor + color);
 			return;
@@ -2909,6 +2942,29 @@ void BattlescapeState::finishBattle(bool abort, int inExitArea)
 	if (_save->getAmbientSound() != -1)
 	{
 		_game->getMod()->getSoundByDepth(0, _save->getAmbientSound())->stopLoop();
+	}
+
+	// dear civilians and summoned player units,
+	// please drop all borrowed xcom equipment now, so that we can recover it
+	// thank you!
+	for (auto* unit : *_save->getUnits())
+	{
+		bool relevantUnitType = unit->getOriginalFaction() == FACTION_NEUTRAL || unit->isSummonedPlayerUnit();
+		if (relevantUnitType && !unit->isOut())
+		{
+			std::vector<BattleItem*> itemsToDrop;
+			for (auto* item : *unit->getInventory())
+			{
+				if (item->getXCOMProperty())
+				{
+					itemsToDrop.push_back(item);
+				}
+			}
+			for (auto* xcomItem : itemsToDrop)
+			{
+				_save->getTileEngine()->itemDrop(unit->getTile(), xcomItem, false);
+			}
+		}
 	}
 
 	_battleGame->removeSummonedPlayerUnits();

@@ -23,6 +23,7 @@
 #include "SavedBattleGame.h"
 #include "SavedGame.h"
 #include "Tile.h"
+#include "HitLog.h"
 #include "Node.h"
 #include "../Mod/MapDataSet.h"
 #include "../Mod/MCDPatch.h"
@@ -1076,15 +1077,20 @@ int SavedBattleGame::getBughuntMinTurn() const
  */
 void SavedBattleGame::startFirstTurn()
 {
+	// this should be first tile with all items, even if unit is in reality on other tile.
+	Tile *inventoryTile = getSelectedUnit()->getTile();
+
+	randomizeItemLocations(inventoryTile);
+
 	resetUnitTiles();
 
-	Tile *inventoryTile = getSelectedUnit()->getTile();
-	randomizeItemLocations(inventoryTile);
+	// check what unit is still on this tile after reset.
 	if (inventoryTile->getUnit())
 	{
 		// make sure we select the unit closest to the ramp.
 		setSelectedUnit(inventoryTile->getUnit());
 	}
+
 
 	// initialize xcom units for battle
 	for (auto u : *getUnits())
@@ -1197,6 +1203,10 @@ void SavedBattleGame::endTurn()
 			{
 				(*i)->setTurnsSinceSpotted(0);
 			}
+			if ((*i)->getAIModule())
+			{
+				(*i)->getAIModule()->reset(); // clean up AI state
+			}
 
 			if ((*i)->getTurnsLeftSpottedForSnipers() != 0)
 			{
@@ -1305,7 +1315,25 @@ BattlescapeState *SavedBattleGame::getBattleState()
  * Gets the BattlescapeState.
  * @return Pointer to the BattlescapeState.
  */
+const BattlescapeState *SavedBattleGame::getBattleState() const
+{
+	return _battleState;
+}
+
+/**
+ * Gets the BattlescapeState.
+ * @return Pointer to the BattlescapeState.
+ */
 BattlescapeGame *SavedBattleGame::getBattleGame()
+{
+	return _battleState->getBattleGame();
+}
+
+/**
+ * Gets the BattlescapeState.
+ * @return Pointer to the BattlescapeState.
+ */
+const BattlescapeGame *SavedBattleGame::getBattleGame() const
 {
 	return _battleState->getBattleGame();
 }
@@ -1428,14 +1456,13 @@ void SavedBattleGame::removeItem(BattleItem *item)
  * @param unit Unit that should get weapon.
  * @param fixed List of built-in items.
  */
-void SavedBattleGame::addFixedItems(BattleUnit *unit, const std::vector<std::string> &fixed)
+void SavedBattleGame::addFixedItems(BattleUnit *unit, const std::vector<const RuleItem*> &fixed)
 {
 	if (!fixed.empty())
 	{
-		std::vector<RuleItem*> ammo;
-		for (std::vector<std::string>::const_iterator j = fixed.begin(); j != fixed.end(); ++j)
+		std::vector<const RuleItem*> ammo;
+		for (const auto& ruleItem : fixed)
 		{
-			RuleItem *ruleItem = _rule->getItem(*j);
 			if (ruleItem)
 			{
 				if (ruleItem->getBattleType() == BT_AMMO)
@@ -1446,9 +1473,9 @@ void SavedBattleGame::addFixedItems(BattleUnit *unit, const std::vector<std::str
 				createItemForUnit(ruleItem, unit, true);
 			}
 		}
-		for (std::vector<RuleItem*>::const_iterator j = ammo.begin(); j != ammo.end(); ++j)
+		for (const auto& ruleItem : ammo)
 		{
-			createItemForUnit(*j, unit, true);
+			createItemForUnit(ruleItem, unit, true);
 		}
 	}
 }
@@ -1564,7 +1591,7 @@ BattleItem *SavedBattleGame::createItemForTile(const std::string& type, Tile *ti
 /**
  * Create new item for tile;
  */
-BattleItem *SavedBattleGame::createItemForTile(RuleItem *rule, Tile *tile)
+BattleItem *SavedBattleGame::createItemForTile(const RuleItem *rule, Tile *tile)
 {
 	BattleItem *item = new BattleItem(rule, getCurrentItemId());
 	if (tile)
@@ -2800,6 +2827,18 @@ void getGeoscapeSaveScript(SavedBattleGame* sbg, SavedGame*& val)
 	}
 }
 
+void getTileScript(const SavedBattleGame* sbg, const Tile*& t, int x, int y, int z)
+{
+	if (sbg)
+	{
+		t = sbg->getTile(Position(x, y, z));
+	}
+	else
+	{
+		t = nullptr;
+	}
+}
+
 void tryConcealUnitScript(SavedBattleGame* sbg, BattleUnit* bu, int& val)
 {
 	if (sbg && bu)
@@ -2843,6 +2882,7 @@ void SavedBattleGame::ScriptRegister(ScriptParserBase* parser)
 
 	sbg.add<&SavedBattleGame::getTurn>("getTurn");
 	sbg.add<&SavedBattleGame::getAnimFrame>("getAnimFrame");
+	sbg.add<&getTileScript>("getTile", "Get tile on position x, y, z");
 
 	sbg.addPair<SavedGame, &getGeoscapeSaveScript, &getGeoscapeSaveScript>("getGeoscapeGame");
 

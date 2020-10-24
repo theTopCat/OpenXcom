@@ -65,7 +65,7 @@ namespace OpenXcom
  * @param base Pointer to the base to get info from.
  * @param craft ID of the selected craft.
  */
-CraftEquipmentState::CraftEquipmentState(Base *base, size_t craft) : _lstScroll(0), _sel(0), _craft(craft), _base(base), _totalItems(0), _ammoColor(0), _reload(true)
+CraftEquipmentState::CraftEquipmentState(Base *base, size_t craft) : _lstScroll(0), _sel(0), _craft(craft), _base(base), _totalItems(0), _totalItemStorageSize(0.0), _ammoColor(0), _reload(true)
 {
 	Craft *c = _base->getCrafts()->at(_craft);
 	bool craftHasACrew = c->getNumSoldiers() > 0;
@@ -303,6 +303,7 @@ void CraftEquipmentState::initList()
 
 	// reset
 	_totalItems = 0;
+	_totalItemStorageSize = 0.0;
 	_items.clear();
 	_lstEquipment->clearList();
 
@@ -322,6 +323,7 @@ void CraftEquipmentState::initList()
 		{
 			cQty = c->getItems()->getItem(*i);
 			_totalItems += cQty;
+			_totalItemStorageSize += cQty * rule->getSize();
 		}
 
 		if ((isVehicle || rule->isInventoryItem()) && rule->canBeEquippedToCraftInventory() &&
@@ -355,12 +357,11 @@ void CraftEquipmentState::initList()
 					bool isOK = rule->belongsToCategory(selectedCategory);
 					if (shareAmmoCategories && !isOK && rule->getBattleType() == BT_FIREARM)
 					{
-						for (auto& compatibleAmmoName : *rule->getPrimaryCompatibleAmmo())
+						for (auto* ammoRule : *rule->getPrimaryCompatibleAmmo())
 						{
-							if (_base->getStorageItems()->getItem(compatibleAmmoName) > 0 || c->getItems()->getItem(compatibleAmmoName) > 0)
+							if (_base->getStorageItems()->getItem(ammoRule) > 0 || c->getItems()->getItem(ammoRule) > 0)
 							{
-								RuleItem *ammoRule = _game->getMod()->getItem(compatibleAmmoName);
-								if (ammoRule && ammoRule->isInventoryItem() && ammoRule->canBeEquippedToCraftInventory() && _game->getSavedGame()->isResearched(ammoRule->getRequirements()))
+								if (ammoRule->isInventoryItem() && ammoRule->canBeEquippedToCraftInventory() && _game->getSavedGame()->isResearched(ammoRule->getRequirements()))
 								{
 									isOK = ammoRule->belongsToCategory(selectedCategory);
 									if (isOK) break;
@@ -642,24 +643,17 @@ void CraftEquipmentState::moveLeftByValue(int change)
 	// Convert vehicle to item
 	if (item->getVehicleUnit())
 	{
-		if (!item->getPrimaryCompatibleAmmo()->empty())
+		if (item->getVehicleClipAmmo())
 		{
 			// Calculate how much ammo needs to be added to the base.
-			RuleItem *ammo = _game->getMod()->getItem(item->getPrimaryCompatibleAmmo()->front(), true);
-			int ammoPerVehicle;
-			if (ammo->getClipSize() > 0 && item->getClipSize() > 0)
-			{
-				ammoPerVehicle = item->getClipSize() / ammo->getClipSize();
-			}
-			else
-			{
-				ammoPerVehicle = ammo->getClipSize();
-			}
+			const RuleItem *ammo = item->getVehicleClipAmmo();
+			int ammoPerVehicle = item->getVehicleClipsLoaded();
+
 			// Put the vehicles and their ammo back as separate items.
 			if (_game->getSavedGame()->getMonthsPassed() != -1)
 			{
 				_base->getStorageItems()->addItem(_items[_sel], change);
-				_base->getStorageItems()->addItem(ammo->getType(), ammoPerVehicle * change);
+				_base->getStorageItems()->addItem(ammo, ammoPerVehicle * change);
 			}
 			// now delete the vehicles from the craft.
 			Collections::deleteIf(*c->getVehicles(), change,
@@ -687,6 +681,7 @@ void CraftEquipmentState::moveLeftByValue(int change)
 	{
 		c->getItems()->removeItem(_items[_sel], change);
 		_totalItems -= change;
+		_totalItemStorageSize -= change * item->getSize();
 		if (_game->getSavedGame()->getMonthsPassed() > -1)
 		{
 			_base->getStorageItems()->addItem(_items[_sel], change);
@@ -734,23 +729,13 @@ void CraftEquipmentState::moveRightByValue(int change, bool suppressErrors)
 		if (room > 0)
 		{
 			change = std::min(room, change);
-			if (!item->getPrimaryCompatibleAmmo()->empty())
+			if (item->getVehicleClipAmmo())
 			{
 				// And now let's see if we can add the total number of vehicles.
-				RuleItem *ammo = _game->getMod()->getItem(item->getPrimaryCompatibleAmmo()->front(), true);
-				int ammoPerVehicle, clipSize;
-				if (ammo->getClipSize() > 0 && item->getClipSize() > 0)
-				{
-					clipSize = item->getClipSize();
-					ammoPerVehicle = clipSize / ammo->getClipSize();
-				}
-				else
-				{
-					clipSize = ammo->getClipSize();
-					ammoPerVehicle = clipSize;
-				}
+				const RuleItem *ammo = item->getVehicleClipAmmo();
+				int ammoPerVehicle = item->getVehicleClipsLoaded();
 
-				int baseQty = _base->getStorageItems()->getItem(ammo->getType()) / ammoPerVehicle;
+				int baseQty = _base->getStorageItems()->getItem(ammo) / ammoPerVehicle;
 				if (_game->getSavedGame()->getMonthsPassed() == -1)
 					baseQty = change;
 				int canBeAdded = std::min(change, baseQty);
@@ -760,10 +745,10 @@ void CraftEquipmentState::moveRightByValue(int change, bool suppressErrors)
 					{
 						if (_game->getSavedGame()->getMonthsPassed() != -1)
 						{
-							_base->getStorageItems()->removeItem(ammo->getType(), ammoPerVehicle);
+							_base->getStorageItems()->removeItem(ammo, ammoPerVehicle);
 							_base->getStorageItems()->removeItem(_items[_sel]);
 						}
-						c->getVehicles()->push_back(new Vehicle(item, clipSize, size));
+						c->getVehicles()->push_back(new Vehicle(item, item->getVehicleClipSize(), size));
 					}
 				}
 				else
@@ -781,7 +766,7 @@ void CraftEquipmentState::moveRightByValue(int change, bool suppressErrors)
 			else
 				for (int i = 0; i < change; ++i)
 				{
-					c->getVehicles()->push_back(new Vehicle(item, item->getClipSize(), size));
+					c->getVehicles()->push_back(new Vehicle(item, item->getVehicleClipSize(), size));
 					if (_game->getSavedGame()->getMonthsPassed() != -1)
 					{
 						_base->getStorageItems()->removeItem(_items[_sel]);
@@ -802,8 +787,28 @@ void CraftEquipmentState::moveRightByValue(int change, bool suppressErrors)
 			}
 			change = c->getRules()->getMaxItems() - _totalItems;
 		}
+		if (c->getRules()->getMaxStorageSpace() > 0.0 && _totalItemStorageSize + (change * item->getSize()) > c->getRules()->getMaxStorageSpace() + 0.05)
+		{
+			if (item->getSize() > 0.0)
+			{
+				change = (int)floor((c->getRules()->getMaxStorageSpace() + 0.05 - _totalItemStorageSize) / item->getSize());
+			}
+			if (change < 0)
+			{
+				// if the player is already over the maximum (e.g. after a mod update), don't go into some ridiculous minus values
+				change = 0;
+			}
+			if (!suppressErrors)
+			{
+				_timerRight->stop();
+				LocalizedText msg(tr("STR_NO_MORE_EQUIPMENT_ALLOWED_BY_SIZE").arg(c->getRules()->getMaxStorageSpace()));
+				_game->pushState(new ErrorMessageState(msg, _palette, _game->getMod()->getInterface("craftEquipment")->getElement("errorMessage")->color, "BACK04.SCR", _game->getMod()->getInterface("craftEquipment")->getElement("errorPalette")->color));
+				_reload = false;
+			}
+		}
 		c->getItems()->addItem(_items[_sel],change);
 		_totalItems += change;
+		_totalItemStorageSize += change * item->getSize();
 		if (_game->getSavedGame()->getMonthsPassed() > -1)
 		{
 			_base->getStorageItems()->removeItem(_items[_sel],change);
@@ -820,6 +825,13 @@ void CraftEquipmentState::btnClearClick(Action *)
 	for (_sel = 0; _sel != _items.size(); ++_sel)
 	{
 		moveLeftByValue(INT_MAX);
+	}
+
+	// in New Battle, clear also stuff that is not displayed on the GUI (for whatever reason)
+	if (_game->getSavedGame()->getMonthsPassed() == -1)
+	{
+		Craft* c = _base->getCrafts()->at(_craft);
+		c->getItems()->getContents()->clear();
 	}
 }
 

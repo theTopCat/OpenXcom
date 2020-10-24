@@ -40,6 +40,7 @@
 #include "../Savegame/Soldier.h"
 #include "../Savegame/Craft.h"
 #include "../Savegame/ItemContainer.h"
+#include "../Savegame/Vehicle.h"
 #include "../Mod/RuleItem.h"
 #include "../Mod/Armor.h"
 #include "../Mod/RuleCraft.h"
@@ -64,9 +65,28 @@ namespace OpenXcom
  * @param base Pointer to the base to get info from.
  * @param origin Game section that originated this state.
  */
-SellState::SellState(Base *base, DebriefingState *debriefingState, OptionsOrigin origin) : _base(base), _debriefingState(debriefingState), _sel(0), _total(0), _spaceChange(0), _origin(origin), _reset(false), _sellAllButOne(false)
+SellState::SellState(Base *base, DebriefingState *debriefingState, OptionsOrigin origin) : _base(base), _debriefingState(debriefingState), _sel(0), _total(0), _spaceChange(0), _origin(origin),
+	_reset(false), _sellAllButOne(false), _delayedInitDone(false)
 {
+	_timerInc = new Timer(250);
+	_timerInc->onTimer((StateHandler)&SellState::increase);
+	_timerDec = new Timer(250);
+	_timerDec->onTimer((StateHandler)&SellState::decrease);
+}
+
+/**
+ * Delayed constructor functionality.
+ */
+void SellState::delayedInit()
+{
+	if (_delayedInitDone)
+	{
+		return;
+	}
+	_delayedInitDone = true;
+
 	bool overfull = _debriefingState == 0 && Options::storageLimitsEnforced && _base->storesOverfull();
+	bool overfullCritical = overfull ? _base->storesOverfullCritical() : false;
 
 	// Create objects
 	_window = new Window(this, 320, 200, 0, 0);
@@ -159,20 +179,6 @@ SellState::SellState(Base *base, DebriefingState *debriefingState, OptionsOrigin
 
 	_cats.push_back("STR_ALL_ITEMS");
 
-	const std::vector<std::string> &cw = _game->getMod()->getCraftWeaponsList();
-	for (std::vector<std::string>::const_iterator i = cw.begin(); i != cw.end(); ++i)
-	{
-		RuleCraftWeapon *rule = _game->getMod()->getCraftWeapon(*i);
-		_craftWeapons.insert(rule->getLauncherItem());
-		_craftWeapons.insert(rule->getClipItem());
-	}
-	const std::vector<std::string> &ar = _game->getMod()->getArmorsList();
-	for (std::vector<std::string>::const_iterator i = ar.begin(); i != ar.end(); ++i)
-	{
-		Armor *rule = _game->getMod()->getArmor(*i);
-		_armors.insert(rule->getStoreItem());
-	}
-
 	for (std::vector<Soldier*>::iterator i = _base->getSoldiers()->begin(); i != _base->getSoldiers()->end(); ++i)
 	{
 		if (_debriefingState) break;
@@ -224,25 +230,33 @@ SellState::SellState(Base *base, DebriefingState *debriefingState, OptionsOrigin
 	const std::vector<std::string> &items = _game->getMod()->getItemsList();
 	for (std::vector<std::string>::const_iterator i = items.begin(); i != items.end(); ++i)
 	{
-		int qty = _base->getStorageItems()->getItem(*i);
-		if (Options::storageLimitsEnforced && _origin == OPT_BATTLESCAPE)
-		{
-			for (std::vector<Transfer*>::iterator j = _base->getTransfers()->begin(); j != _base->getTransfers()->end(); ++j)
-			{
-				if ((*j)->getItems() == *i)
-				{
-					qty += (*j)->getQuantity();
-				}
-			}
-			for (std::vector<Craft*>::iterator j = _base->getCrafts()->begin(); j != _base->getCrafts()->end(); ++j)
-			{
-				qty += (*j)->getItems()->getItem(*i);
-			}
-		}
-		RuleItem *rule = _game->getMod()->getItem(*i, true);
+		const RuleItem *rule = _game->getMod()->getItem(*i, true);
+		int qty = 0;
 		if (_debriefingState != 0)
 		{
 			qty = _debriefingState->getRecoveredItemCount(rule);
+		}
+		else
+		{
+			qty = _base->getStorageItems()->getItem(rule);
+			if (Options::storageLimitsEnforced && (_origin == OPT_BATTLESCAPE || overfullCritical))
+			{
+				for (std::vector<Transfer*>::iterator j = _base->getTransfers()->begin(); j != _base->getTransfers()->end(); ++j)
+				{
+					if ((*j)->getItems() == *i)
+					{
+						qty += (*j)->getQuantity();
+					}
+					else if ((*j)->getCraft())
+					{
+						qty += overfullCritical ? (*j)->getCraft()->getTotalItemCount(rule) : (*j)->getCraft()->getItems()->getItem(rule);
+					}
+				}
+				for (std::vector<Craft*>::iterator j = _base->getCrafts()->begin(); j != _base->getCrafts()->end(); ++j)
+				{
+					qty +=  overfullCritical ? (*j)->getTotalItemCount(rule) : (*j)->getItems()->getItem(rule);
+				}
+			}
 		}
 		if (qty > 0 && (Options::canSellLiveAliens || !rule->isAlien()))
 		{
@@ -262,7 +276,8 @@ SellState::SellState(Base *base, DebriefingState *debriefingState, OptionsOrigin
 		}
 	}
 
-	if (_game->getMod()->getUseCustomCategories())
+	_vanillaCategories = _cats.size();
+	if (_game->getMod()->getDisplayCustomCategories() > 0)
 	{
 		bool hasUnassigned = false;
 
@@ -287,8 +302,12 @@ SellState::SellState(Base *base, DebriefingState *debriefingState, OptionsOrigin
 			}
 		}
 		// then use them nicely in order
-		_cats.clear();
-		_cats.push_back("STR_ALL_ITEMS");
+		if (_game->getMod()->getDisplayCustomCategories() == 1)
+		{
+			_cats.clear();
+			_cats.push_back("STR_ALL_ITEMS");
+			_vanillaCategories = _cats.size();
+		}
 		const std::vector<std::string> &categories = _game->getMod()->getItemCategoriesList();
 		for (std::vector<std::string>::const_iterator k = categories.begin(); k != categories.end(); ++k)
 		{
@@ -318,11 +337,6 @@ SellState::SellState(Base *base, DebriefingState *debriefingState, OptionsOrigin
 	_cbxCategory->onKeyboardRelease((ActionHandler)&SellState::btnQuickSearchToggle, Options::keyToggleQuickSearch);
 
 	updateList();
-
-	_timerInc = new Timer(250);
-	_timerInc->onTimer((StateHandler)&SellState::increase);
-	_timerDec = new Timer(250);
-	_timerDec->onTimer((StateHandler)&SellState::decrease);
 }
 
 /**
@@ -339,6 +353,8 @@ SellState::~SellState()
 */
 void SellState::init()
 {
+	delayedInit();
+
 	State::init();
 
 	if (_reset)
@@ -379,18 +395,18 @@ std::string SellState::getCategory(int sel) const
 		rule = (RuleItem*)_items[sel].rule;
 		if (rule->getBattleType() == BT_CORPSE || rule->isAlien())
 		{
+			if (rule->getVehicleUnit())
+				return "STR_PERSONNEL"; // OXCE: critters fighting for us
+			if (rule->isAlien())
+				return "STR_PRISONERS"; // OXCE: live aliens
 			return "STR_ALIENS";
 		}
 		if (rule->getBattleType() == BT_NONE)
 		{
-			if (_craftWeapons.find(rule->getType()) != _craftWeapons.end())
-			{
+			if (_game->getMod()->isCraftWeaponStorageItem(rule))
 				return "STR_CRAFT_ARMAMENT";
-			}
-			if (_armors.find(rule->getType()) != _armors.end())
-			{
-				return "STR_EQUIPMENT";
-			}
+			if (_game->getMod()->isArmorStorageItem(rule))
+				return "STR_ARMORS"; // OXCE: armors
 			return "STR_COMPONENTS";
 		}
 		return "STR_EQUIPMENT";
@@ -459,14 +475,15 @@ void SellState::updateList()
 	_lstItems->clearList();
 	_rows.clear();
 
-	const std::string selectedCategory = _cats[_cbxCategory->getSelected()];
+	size_t selCategory = _cbxCategory->getSelected();
+	const std::string selectedCategory = _cats[selCategory];
 	bool categoryFilterEnabled = (selectedCategory != "STR_ALL_ITEMS");
 	bool categoryUnassigned = (selectedCategory == "STR_UNASSIGNED");
 
 	for (size_t i = 0; i < _items.size(); ++i)
 	{
 		// filter
-		if (_game->getMod()->getUseCustomCategories())
+		if (selCategory >= _vanillaCategories)
 		{
 			if (categoryUnassigned && _items[i].type == TRANSFER_ITEM)
 			{
@@ -536,6 +553,97 @@ void SellState::btnOkClick(Action *)
 	_game->getSavedGame()->setFunds(_game->getSavedGame()->getFunds() + _total);
 	Soldier *soldier;
 	Craft *craft;
+
+	auto cleanUpContainer = [&](ItemContainer* container, const RuleItem* rule, int toRemove) -> int
+	{
+		auto curr = container->getItem(rule);
+		if (curr >= toRemove)
+		{
+			container->removeItem(rule, toRemove);
+			return 0;
+		}
+		else
+		{
+			container->removeItem(rule, INT_MAX);
+			return toRemove - curr;
+		}
+	};
+
+	auto cleanUpCraft = [&](Craft* craft, const RuleItem* rule, int toRemove) -> int
+	{
+		struct S
+		{
+			int ToRemove, ToSave;
+			const RuleItem* rule;
+		};
+
+		auto tryRemove = [&toRemove, rule](int curr, const RuleItem* i) -> S
+		{
+			if (i == rule)
+			{
+				auto r = std::min(toRemove, curr);
+				toRemove -= r;
+				curr -= r;
+				return S{ r, curr, i };
+			}
+			else
+			{
+				return S{ 0, curr, i };
+			}
+		};
+		auto tryStore = [&](S s)
+		{
+			if (s.ToSave > 0)
+			{
+				_base->getStorageItems()->addItem(s.rule, s.ToSave);
+			}
+		};
+
+		for (auto*& w :* craft->getWeapons())
+		{
+			if (w != nullptr)
+			{
+				auto* wr = w->getRules();
+
+				auto launcher = tryRemove(1, wr->getLauncherItem());
+				auto clip = tryRemove(w->getClipsLoaded(), wr->getClipItem());
+				if (launcher.ToRemove || clip.ToRemove)
+				{
+					tryStore(launcher);
+					tryStore(clip);
+
+					delete w;
+					w = nullptr;
+				}
+			}
+		}
+
+		Collections::deleteIf(
+			*craft->getVehicles(),
+			[&](Vehicle* v)
+			{
+				auto clipType = v->getRules()->getVehicleClipAmmo();
+
+				auto launcher = tryRemove(1, v->getRules());
+				auto clip = tryRemove(v->getRules()->getVehicleClipsLoaded(), clipType);
+
+				if (launcher.ToRemove || clip.ToRemove)
+				{
+					tryStore(launcher);
+					tryStore(clip);
+
+					return true;
+				}
+				else
+				{
+					return false;
+				}
+			}
+		);
+
+		return toRemove;
+	};
+
 	for (std::vector<TransferRow>::const_iterator i = _items.begin(); i != _items.end(); ++i)
 	{
 		if (i->amount > 0)
@@ -548,9 +656,9 @@ void SellState::btnOkClick(Action *)
 				{
 					if (*s == soldier)
 					{
-						if ((*s)->getArmor()->getStoreItem() != Armor::NONE)
+						if ((*s)->getArmor()->getStoreItem())
 						{
-							_base->getStorageItems()->addItem((*s)->getArmor()->getStoreItem());
+							_base->getStorageItems()->addItem((*s)->getArmor()->getStoreItem()->getType());
 						}
 						_base->getSoldiers()->erase(s);
 						break;
@@ -571,25 +679,17 @@ void SellState::btnOkClick(Action *)
 				break;
 			case TRANSFER_ITEM:
 				RuleItem *item = (RuleItem*)i->rule;
-				if (_base->getStorageItems()->getItem(item->getType()) < i->amount)
 				{
-					int toRemove = i->amount - _base->getStorageItems()->getItem(item->getType());
-
 					// remove all of said items from base
-					_base->getStorageItems()->removeItem(item->getType(), INT_MAX);
+					int toRemove = cleanUpContainer(_base->getStorageItems(), item, i->amount);
 
 					// if we still need to remove any, remove them from the crafts first, and keep a running tally
 					for (std::vector<Craft*>::iterator j = _base->getCrafts()->begin(); j != _base->getCrafts()->end() && toRemove; ++j)
 					{
-						if ((*j)->getItems()->getItem(item->getType()) < toRemove)
+						toRemove = cleanUpContainer((*j)->getItems(), item, toRemove);
+						if (toRemove > 0)
 						{
-							toRemove -= (*j)->getItems()->getItem(item->getType());
-							(*j)->getItems()->removeItem(item->getType(), INT_MAX);
-						}
-						else
-						{
-							(*j)->getItems()->removeItem(item->getType(), toRemove);
-							toRemove = 0;
+							toRemove = cleanUpCraft((*j), item, toRemove);
 						}
 					}
 
@@ -612,14 +712,20 @@ void SellState::btnOkClick(Action *)
 						}
 						else
 						{
+							if ((*j)->getCraft())
+							{
+								toRemove = cleanUpContainer((*j)->getCraft()->getItems(), item, toRemove);
+								if (toRemove > 0)
+								{
+									toRemove = cleanUpCraft((*j)->getCraft(), item, toRemove);
+								}
+							}
 							++j;
 						}
 					}
 				}
-				else
-				{
-					_base->getStorageItems()->removeItem(item->getType(), i->amount);
-				}
+
+				// Note: this only updates a helper map, it doesn't affect real item recovery (that has already happened and all items are already in the base)
 				if (_debriefingState != 0)
 				{
 					// remember the decreased amount for next sell/transfer
@@ -891,37 +997,22 @@ void SellState::changeByValue(int change, int dir)
 	_total += dir * getRow().cost * change;
 
 	// Calculate the change in storage space.
-	Craft *craft;
 	Soldier *soldier;
-	RuleItem *armor, *item, *weapon, *ammo;
-	double total = 0.0;
+	const RuleItem *item;
 	switch (getRow().type)
 	{
 	case TRANSFER_SOLDIER:
 		soldier = (Soldier*)getRow().rule;
-		if (soldier->getArmor()->getStoreItem() != Armor::NONE)
+		if (soldier->getArmor()->getStoreItem())
 		{
-			armor = _game->getMod()->getItem(soldier->getArmor()->getStoreItem(), true);
-			_spaceChange += dir * armor->getSize();
+			_spaceChange += dir * soldier->getArmor()->getStoreItem()->getSize();
 		}
 		break;
 	case TRANSFER_CRAFT:
-		craft = (Craft*)getRow().rule;
-		for (std::vector<CraftWeapon*>::iterator w = craft->getWeapons()->begin(); w != craft->getWeapons()->end(); ++w)
-		{
-			if (*w)
-			{
-				weapon = _game->getMod()->getItem((*w)->getRules()->getLauncherItem(), true);
-				total += weapon->getSize();
-				ammo = _game->getMod()->getItem((*w)->getRules()->getClipItem());
-				if (ammo)
-					total += ammo->getSize() * (*w)->getClipsLoaded(_game->getMod());
-			}
-		}
-		_spaceChange += dir * total;
+		// Note: in OXCE, there is no storage space change, everything on the craft is already included in the base storage space calculations
 		break;
 	case TRANSFER_ITEM:
-		item = (RuleItem*)getRow().rule;
+		item = (const RuleItem*)getRow().rule;
 		_spaceChange -= dir * change * item->getSize();
 		break;
 	default:

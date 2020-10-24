@@ -33,7 +33,9 @@
 #include "../Engine/Options.h"
 #include "../Engine/Unicode.h"
 #include "../Mod/RuleInterface.h"
+#include <algorithm>
 #include <climits>
+#include <cmath>
 
 namespace OpenXcom
 {
@@ -111,9 +113,10 @@ PlaceFacilityState::PlaceFacilityState(Base *base, const RuleBaseFacility *rule,
 			if (item.second.first > 9) --max;
 			if (item.second.first > 99) --max;
 			std::string name = tr(item.first);
-			if (name.length() > max)
+			UString uname = Unicode::convUtf8ToUtf32(name);
+			if (uname.length() > max)
 			{
-				name = name.substr(0, max);
+				name = Unicode::convUtf32ToUtf8(uname.substr(0, max));
 			}
 
 			ss << name << ": " << item.second.first << std::endl;
@@ -240,7 +243,7 @@ void PlaceFacilityState::viewClick(Action *)
 				}
 			}
 			// Remove any facilities we're building over
-			int reducedBuildTime = 0;
+			double reducedBuildTime = 0.0;
 			bool buildingOver = false;
 			const BaseAreaSubset areaToBuildOver = BaseAreaSubset(_rule->getSize(), _rule->getSize()).offset(_view->getGridX(), _view->getGridY());
 			for (int i = _base->getFacilities()->size() - 1; i >= 0; --i)
@@ -270,7 +273,9 @@ void PlaceFacilityState::viewClick(Action *)
 						}
 
 						// Reduce the build time of the new facility
-						reducedBuildTime += (checkFacility->getRules()->getBuildTime() - checkFacility->getBuildTime()) / (_rule->getSize() * _rule->getSize());
+						double oldSizeSquared = (checkFacility->getRules()->getSize() * checkFacility->getRules()->getSize());
+						double newSizeSquared = (_rule->getSize() * _rule->getSize());
+						reducedBuildTime += (checkFacility->getRules()->getBuildTime() - checkFacility->getBuildTime()) * oldSizeSquared / newSizeSquared;
 
 						// This only counts as building over something if it wasn't in construction
 						if (checkFacility->getBuildTime() == 0)
@@ -291,7 +296,9 @@ void PlaceFacilityState::viewClick(Action *)
 			if (buildingOver)
 			{
 				fac->setIfHadPreviousFacility(true);
-				fac->setBuildTime(std::max(1, fac->getBuildTime() - reducedBuildTime));
+				reducedBuildTime = reducedBuildTime * _game->getMod()->getBuildTimeReductionScaling() / 100.0;
+				int reducedBuildTimeRounded = (int)std::round(reducedBuildTime);
+				fac->setBuildTime(std::max(1, fac->getBuildTime() - reducedBuildTimeRounded));
 			}
 			_base->getFacilities()->push_back(fac);
 			if (Options::allowBuildingQueue)

@@ -21,7 +21,6 @@
 #include <vector>
 #include <string>
 #include <yaml-cpp/yaml.h>
-#include "Mod.h"
 #include "../Savegame/WeightedOptions.h"
 
 namespace OpenXcom
@@ -118,6 +117,8 @@ public:
 	int getBughuntMinTurn() const;
 	/// Gets a pointer to the data.
 	const std::vector<DeploymentData>* getDeploymentData() const;
+	/// Gets the highest used alien rank.
+	int getMaxAlienRank() const;
 	/// Gets dimensions.
 	void getDimensions(int *width, int *length, int *height) const;
 	/// Gets civilians.

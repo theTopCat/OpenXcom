@@ -406,7 +406,7 @@ void Inventory::drawItems()
 			if ((*i)->getUnit())
 			{
 				// don't show on dead units
-				if ((*i)->getUnit()->getStatus() == STATUS_UNCONSCIOUS)
+				if ((*i)->getUnit()->getStatus() == STATUS_UNCONSCIOUS && (*i)->getUnit()->indicatorsAreEnabled())
 				{
 					fatalWounds = (*i)->getUnit()->getFatalWounds();
 					if (_burnIndicator && (*i)->getUnit()->getFire() > 0)
@@ -881,7 +881,7 @@ void Inventory::mouseClick(Action *action, State *state)
 				// Put item in weapon
 				else if (item->isWeaponWithAmmo())
 				{
-					int slotAmmo = item->getRules()->getSlotForAmmo(_selItem->getRules()->getType());
+					int slotAmmo = item->getRules()->getSlotForAmmo(_selItem->getRules());
 					if (slotAmmo == -1)
 					{
 						_warning->showMessage(_game->getLanguage()->getString("STR_WRONG_AMMUNITION_FOR_THIS_WEAPON"));
@@ -1120,6 +1120,10 @@ bool Inventory::unload(bool quickUnload)
 	{
 		// Item must be primed
 		if (_selItem->getFuseTimer() == -1)
+		{
+			return false;
+		}
+		if (_selItem->getRules()->getFuseTimerType() == BFT_NONE)
 		{
 			return false;
 		}

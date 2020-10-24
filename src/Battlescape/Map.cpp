@@ -67,11 +67,19 @@
         y+ \  / x+
             \/
 
+  Compass directions
 
          W  /\  N
            /  \
            \  /
          S  \/  E
+
+  Unit directions
+
+         6  /\  0
+           /  \
+           \  /
+         4  \/  2
  */
 
 namespace OpenXcom
@@ -453,7 +461,7 @@ void Map::drawUnit(UnitSprite &unitSprite, Tile *unitTile, Tile *currTile, Posit
 	else
 	{
 		const Tile *top = _save->getAboveTile(unitTile);
-		if (top && top->hasNoFloor(_save))
+		if (top && top->getOverlappingUnit(_save, TUO_ALWAYS) == bu)
 		{
 			topMargin = -tileFoorHeight / 2;
 		}
@@ -933,7 +941,7 @@ void Map::drawTerrain(Surface *surface)
 							if (_anyIndicator)
 							{
 								BattleUnit *itemUnit = item->getUnit();
-								if (itemUnit && itemUnit->getStatus() == STATUS_UNCONSCIOUS)
+								if (itemUnit && itemUnit->getStatus() == STATUS_UNCONSCIOUS && itemUnit->indicatorsAreEnabled())
 								{
 									if (_burnIndicator && itemUnit->getFire() > 0)
 									{

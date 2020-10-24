@@ -17,7 +17,7 @@
  * You should have received a copy of the GNU General Public License
  * along with OpenXcom.  If not, see <http://www.gnu.org/licenses/>.
  */
-#include <map>
+#include <unordered_map>
 #include <vector>
 #include <utility>
 #include <string>
@@ -49,11 +49,14 @@ class Font
 {
 private:
 	std::vector<FontImage> _images;
-	std::map< UCode, std::pair<size_t, SDL_Rect> > _chars;
+	std::unordered_map< UCode, std::pair<size_t, SDL_Rect> > _chars;
 	bool _monospace;
 	/// Determines the size and position of each character in the font.
 	void init(size_t index, const UString &str);
 public:
+
+	/// Default palette for terminal text.
+	static const SDL_Color TerminalColors[2];
 
 	/// Creates a blank font.
 	Font();
@@ -64,7 +67,7 @@ public:
 	/// Generate the terminal font.
 	void loadTerminal();
 	/// Gets a particular character from the font, with its real size.
-	SurfaceCrop getChar(UCode c);
+	SurfaceCrop getChar(UCode c) const;
 	/// Gets the font's character width.
 	int getWidth() const;
 	/// Gets the font's character height.
@@ -72,11 +75,7 @@ public:
 	/// Gets the spacing between characters.
 	int getSpacing() const;
 	/// Gets the size of a particular character;
-	SDL_Rect getCharSize(UCode c);
-	/// Gets the font's palette.
-	SDL_Color *getPalette() const;
-	/// Sets the font's palette.
-	void setPalette(const SDL_Color *colors, int firstcolor, int ncolors);
+	SDL_Rect getCharSize(UCode c) const;
 };
 
 }

@@ -58,9 +58,9 @@ Projectile::Projectile(Mod *mod, SavedBattleGame *save, BattleAction action, Pos
 			if (ammo)
 			{
 				_bulletSprite = ammo->getRules()->getBulletSprite();
-				_vaporColor = ammo->getRules()->getVaporColor();
-				_vaporDensity = ammo->getRules()->getVaporDensity();
-				_vaporProbability = ammo->getRules()->getVaporProbability();
+				_vaporColor = ammo->getRules()->getVaporColor(_save->getDepth());
+				_vaporDensity = ammo->getRules()->getVaporDensity(_save->getDepth());
+				_vaporProbability = ammo->getRules()->getVaporProbability(_save->getDepth());
 				_speed = std::max(1, _speed + ammo->getRules()->getBulletSpeed());
 			}
 
@@ -71,15 +71,15 @@ Projectile::Projectile(Mod *mod, SavedBattleGame *save, BattleAction action, Pos
 			}
 			if (_vaporColor == -1)
 			{
-				_vaporColor = _action.weapon->getRules()->getVaporColor();
+				_vaporColor = _action.weapon->getRules()->getVaporColor(_save->getDepth());
 			}
 			if (_vaporDensity == -1)
 			{
-				_vaporDensity = _action.weapon->getRules()->getVaporDensity();
+				_vaporDensity = _action.weapon->getRules()->getVaporDensity(_save->getDepth());
 			}
 			if (_vaporProbability == 5)
 			{
-				_vaporProbability = _action.weapon->getRules()->getVaporProbability();
+				_vaporProbability = _action.weapon->getRules()->getVaporProbability(_save->getDepth());
 			}
 			if (!ammo || (ammo != _action.weapon || ammo->getRules()->getBulletSpeed() == 0))
 			{
@@ -278,7 +278,7 @@ int Projectile::calculateThrow(double accuracy)
 	for (std::vector<Position>::iterator i = targets.begin(); i != targets.end(); ++i)
 	{
 		targetVoxel = *i;
-		if (_save->getTileEngine()->validateThrow(_action, originVoxel, targetVoxel, &curvature, &test, forced))
+		if (_save->getTileEngine()->validateThrow(_action, originVoxel, targetVoxel, _save->getDepth(), &curvature, &test, forced))
 		{
 			break;
 		}
@@ -304,6 +304,7 @@ int Projectile::calculateThrow(double accuracy)
 			applyAccuracy(originVoxel, &targetVoxel, accuracy, true, false); //arcing shot deviation
 			deltas = Position(0,0,0);
 		}
+		_trajectory.push_back(originVoxel);
 		test = _save->getTileEngine()->calculateParabolaVoxel(originVoxel, targetVoxel, true, &_trajectory, _action.actor, curvature, deltas);
 		if (forced) return O_OBJECT; //fake hit
 		Position endPoint = _trajectory.back().toTile();
@@ -457,7 +458,7 @@ bool Projectile::move()
 		{
 			_distance += Position::distance(_trajectory[_position], _trajectory[_position - 1]);
 		}
-		if (_save->getDepth() > 0 && _vaporColor != -1 && _action.type != BA_THROW && RNG::percent(_vaporProbability))
+		if (_vaporColor != -1 && _action.type != BA_THROW && RNG::percent(_vaporProbability))
 		{
 			addVaporCloud();
 		}
@@ -475,6 +476,8 @@ Position Projectile::getPosition(int offset) const
 	int posOffset = (int)_position + offset;
 	if (posOffset >= 0 && posOffset < (int)_trajectory.size())
 		return _trajectory.at(posOffset);
+	else if (posOffset < 0)
+		return _trajectory.at(0);
 	else
 		return _trajectory.at(_position);
 }

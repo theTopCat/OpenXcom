@@ -21,6 +21,7 @@
 #include "Mod.h"
 #include "MapScript.h"
 #include "../Battlescape/Position.h"
+#include "../Battlescape/TileEngine.h"
 #include "../Engine/Exception.h"
 #include "../Engine/Collections.h"
 #include "../Savegame/Base.h"
@@ -63,7 +64,7 @@ void RuleBaseFacility::load(const YAML::Node &node, Mod *mod, int listOrder)
 		load(parent, mod, listOrder);
 	}
 	_type = node["type"].as<std::string>(_type);
-	_requires = node["requires"].as< std::vector<std::string> >(_requires);
+	mod->loadUnorderedNames(_type, _requires, node["requires"]);
 
 	mod->loadBaseFunction(_type, _requiresBaseFunc, node["requiresBaseFunc"]);
 	mod->loadBaseFunction(_type, _provideBaseFunc, node["provideBaseFunc"]);
@@ -147,10 +148,10 @@ void RuleBaseFacility::load(const YAML::Node &node, Mod *mod, int listOrder)
 		}
 	}
 
-	_leavesBehindOnSellNames = node["leavesBehindOnSell"].as< std::vector<std::string> >(_leavesBehindOnSellNames);
+	mod->loadNames(_type, _leavesBehindOnSellNames, node["leavesBehindOnSell"]);
 	_removalTime = node["removalTime"].as<int>(_removalTime);
 	_canBeBuiltOver = node["canBeBuiltOver"].as<bool>(_canBeBuiltOver);
-	_buildOverFacilitiesNames = node["buildOverFacilities"].as< std::vector<std::string> >(_buildOverFacilitiesNames);
+	mod->loadUnorderedNames(_type, _buildOverFacilitiesNames, node["buildOverFacilities"]);
 	std::sort(_buildOverFacilities.begin(), _buildOverFacilities.end());
 
 	_storageTiles = node["storageTiles"].as<std::vector<Position> >(_storageTiles);
@@ -164,7 +165,7 @@ void RuleBaseFacility::afterLoad(const Mod* mod)
 {
 	if (!_destroyedFacilityName.empty())
 	{
-		_destroyedFacility = mod->getBaseFacility(_destroyedFacilityName, true);
+		mod->linkRule(_destroyedFacility, _destroyedFacilityName);
 		if (_destroyedFacility->getSize() != _size)
 		{
 			throw Exception("Destroyed version of a facility must have the same size as the original facility.");
@@ -197,19 +198,38 @@ void RuleBaseFacility::afterLoad(const Mod* mod)
 	}
 	if (_buildOverFacilitiesNames.size())
 	{
-		_buildOverFacilities.reserve(_buildOverFacilitiesNames.size());
-		for (const auto& n : _buildOverFacilitiesNames)
-		{
-			_buildOverFacilities.push_back(mod->getBaseFacility(n, true));
-		}
+		mod->linkRule(_buildOverFacilities, _buildOverFacilitiesNames);
 		Collections::sortVector(_buildOverFacilities);
 	}
 	if (_mapName.empty())
 	{
 		throw Exception("Battlescape map name is missing.");
 	}
+	if (_storageTiles.size() > 0)
+	{
+		if (_storageTiles.size() != 1 || _storageTiles[0] != TileEngine::invalid)
+		{
+			const auto size = 10 * _size;
+			for (const auto& p : _storageTiles)
+			{
+				if (p.x < 0 || p.x > size ||
+					p.y < 0 || p.y > size ||
+					p.z < 0 || p.z > 8) // accurate max z will be check during map creation when we know map heigth, now we only check for very bad values.
+				{
+					if (p == TileEngine::invalid)
+					{
+						throw Exception("Invalid tile position (-1, -1, -1) can be only one in storage position list.");
+					}
+					else
+					{
+						throw Exception("Tile position (" + std::to_string(p.x) + ", " + std::to_string(p.y)+ ", " + std::to_string(p.z) + ") is outside the facility area.");
+					}
+				}
+			}
+		}
+	}
+
 	Collections::removeAll(_leavesBehindOnSellNames);
-	Collections::removeAll(_buildOverFacilitiesNames);
 }
 
 /**

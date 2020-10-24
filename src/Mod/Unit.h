@@ -28,6 +28,7 @@ namespace OpenXcom
 
 class Mod;
 class Armor;
+class RuleItem;
 class ModScript;
 class ScriptParserBase;
 
@@ -68,6 +69,29 @@ struct UnitStats
 		{
 			f(p);
 		}
+	}
+
+	static UnitStats templateMerge(const UnitStats& origStats, const UnitStats& fixedStats)
+	{
+		UnitStats r;
+		fieldLoop(
+			[&](Ptr p)
+			{
+				if ((fixedStats.*p) == -1)
+				{
+					(r.*p) = 0;
+				}
+				else if ((fixedStats.*p) != 0)
+				{
+					(r.*p) = (fixedStats.*p);
+				}
+				else
+				{
+					(r.*p) = (origStats.*p);
+				}
+			}
+		);
+		return r;
 	}
 
 	/*
@@ -340,7 +364,7 @@ private:
 	std::string _rank;
 	UnitStats _stats;
 	std::string _armorName;
-	Armor* _armor;
+	const Armor* _armor;
 	int _standHeight, _kneelHeight, _floatHeight;
 	std::vector<int> _deathSound, _panicSound, _berserkSound;
 	std::vector<int> _selectUnitSound, _startMovingSound, _selectWeaponSound, _annoyedSound;
@@ -351,7 +375,8 @@ private:
 	std::string _spawnUnitName;
 	bool _livingWeapon;
 	std::string _meleeWeapon, _psiWeapon;
-	std::vector<std::vector<std::string> > _builtInWeapons;
+	std::vector<std::vector<std::string> > _builtInWeaponsNames;
+	std::vector<std::vector<const RuleItem*> > _builtInWeapons;
 	bool _capturable;
 	bool _canSurrender, _autoSurrender;
 	bool _isLeeroyJenkins;
@@ -429,7 +454,7 @@ public:
 	/// Gets the name of any psi weapon that may be built in to this unit.
 	const std::string &getPsiWeapon() const;
 	/// Gets a vector of integrated items this unit has available.
-	const std::vector<std::vector<std::string> > &getBuiltInWeapons() const;
+	const std::vector<std::vector<const RuleItem*> > &getBuiltInWeapons() const;
 	/// Gets whether the alien can be captured alive.
 	bool getCapturable() const;
 	/// Checks if this unit can surrender.
@@ -440,7 +465,7 @@ public:
 	/// Should the unit get "stuck" trying to fire from outside of weapon range? Vanilla bug, that may serve as "feature" in rare cases.
 	bool waitIfOutsideWeaponRange() { return _waitIfOutsideWeaponRange; };
 	/// Should the unit try to pick up weapons more actively?
-	bool pickUpWeaponsMoreActively(Mod *mod) const;
+	int getPickUpWeaponsMoreActively() const { return _pickUpWeaponsMoreActively; }
 	/// Should alien inventory show full name (e.g. Sectoid Leader) or just the race (e.g. Sectoid)?
 	bool getShowFullNameInAlienInventory(Mod *mod) const;
 

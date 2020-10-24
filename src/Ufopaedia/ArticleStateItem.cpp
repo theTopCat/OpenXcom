@@ -87,9 +87,8 @@ namespace OpenXcom
 				bool allSame = true;
 				for (int slot = 0; slot < RuleItem::AmmoSlotMax; ++slot)
 				{
-					for (auto ammo : *item->getCompatibleAmmoForSlot(slot))
+					for (auto ammoItemRule : *item->getCompatibleAmmoForSlot(slot))
 					{
-						RuleItem *ammoItemRule = _game->getMod()->getItem(ammo, true);
 						if (first)
 						{
 							powerBonus = addRuleStatBonus(*ammoItemRule->getDamageBonusRaw());
@@ -142,6 +141,11 @@ namespace OpenXcom
 		setStandardPalette("PAL_BATTLEPEDIA");
 
 		_buttonColor = _game->getMod()->getInterface("articleItem")->getElement("button")->color;
+		_arrowColor = _buttonColor;
+		if (_game->getMod()->getInterface("articleItem")->getElement("arrow"))
+		{
+			_arrowColor = _game->getMod()->getInterface("articleItem")->getElement("arrow")->color;
+		}
 		_textColor = _game->getMod()->getInterface("articleItem")->getElement("text")->color;
 		_textColor2 = _game->getMod()->getInterface("articleItem")->getElement("text")->color2;
 		_listColor1 = _game->getMod()->getInterface("articleItem")->getElement("list")->color;
@@ -179,15 +183,15 @@ namespace OpenXcom
 
 		auto ammoSlot = defs->getAmmoSlotForPage(_state->current_page);
 		auto ammoSlotPrevUsage = defs->getAmmoSlotPrevUsageForPage(_state->current_page);
-		const std::vector<std::string> dummy;
-		const std::vector<std::string> *ammo_data = ammoSlot != RuleItem::AmmoSlotSelfUse ? item->getCompatibleAmmoForSlot(ammoSlot) : &dummy;
+		const std::vector<const RuleItem*> dummy;
+		const std::vector<const RuleItem*> *ammo_data = ammoSlot != RuleItem::AmmoSlotSelfUse ? item->getCompatibleAmmoForSlot(ammoSlot) : &dummy;
 
 		int weight = item->getWeight();
 		std::string weightLabel = tr("STR_WEIGHT_PEDIA1").arg(weight);
 		if (!ammo_data->empty())
 		{
 			// Note: weight including primary ammo only!
-			RuleItem *ammo_rule = _game->getMod()->getItem((*ammo_data)[0]);
+			const RuleItem *ammo_rule = (*ammo_data)[0];
 			weightLabel = tr("STR_WEIGHT_PEDIA2").arg(weight).arg(weight + ammo_rule->getWeight());
 		}
 		_txtWeight->setText(weight > 0 ? weightLabel : "");
@@ -368,7 +372,7 @@ namespace OpenXcom
 					int currShow = 0;
 					for (auto& type : *ammo_data)
 					{
-						ArticleDefinition *ammo_article = _game->getMod()->getUfopaediaArticle(type, true);
+						ArticleDefinition *ammo_article = _game->getMod()->getUfopaediaArticle(type->getType(), true);
 						if (Ufopaedia::isArticleAvailable(_game->getSavedGame(), ammo_article))
 						{
 							if (skipShow > 0)
@@ -376,11 +380,10 @@ namespace OpenXcom
 								--skipShow;
 								continue;
 							}
-							RuleItem *ammo_rule = _game->getMod()->getItem(type, true);
 
-							addAmmoDamagePower(currShow, ammo_rule);
+							addAmmoDamagePower(currShow, type);
 
-							ammo_rule->drawHandSprite(_game->getMod()->getSurfaceSet("BIGOBS.PCK"), _imageAmmo[currShow]);
+							type->drawHandSprite(_game->getMod()->getSurfaceSet("BIGOBS.PCK"), _imageAmmo[currShow]);
 
 							++currShow;
 							if (currShow == maxShow)
@@ -406,6 +409,16 @@ namespace OpenXcom
 				break;
 			default: break;
 		}
+
+		// multi-page indicator
+		_txtArrows = new Text(32, 9, 280, 183);
+		add(_txtArrows);
+		_txtArrows->setColor(_arrowColor);
+		_txtArrows->setAlign(ALIGN_RIGHT);
+		std::ostringstream ss2;
+		if (_state->hasPrevArticlePage()) ss2 << "<<";
+		if (_state->hasNextArticlePage()) ss2 << " >>";
+		_txtArrows->setText(ss2.str());
 
 		centerAllSurfaces();
 	}

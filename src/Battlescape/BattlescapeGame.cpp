@@ -348,16 +348,12 @@ void BattlescapeGame::handleAI(BattleUnit *unit)
 
 	_AIActionCounter = action.number;
 	BattleItem *weapon = unit->getMainHandWeapon();
-	bool pickUpWeaponsMoreActively = false;
+	bool pickUpWeaponsMoreActively = unit->getPickUpWeaponsMoreActively();
 	bool weaponPickedUp = false;
 	if (!weapon || !weapon->haveAnyAmmo())
 	{
 		if (unit->getOriginalFaction() != FACTION_PLAYER)
 		{
-			if (unit->getUnitRules())
-			{
-				pickUpWeaponsMoreActively = unit->getUnitRules()->pickUpWeaponsMoreActively(getMod());
-			}
 			if ((unit->getOriginalFaction() == FACTION_HOSTILE && unit->getVisibleUnits()->empty()) || pickUpWeaponsMoreActively)
 			{
 				weaponPickedUp = findItem(&action, pickUpWeaponsMoreActively);
@@ -512,7 +508,7 @@ void BattlescapeGame::endTurn()
 				const RuleItem *rule = item->getRules();
 				const Tile *tile = item->getTile();
 				BattleUnit *unit = item->getOwner();
-				if (!tile && unit && rule->isExplodingInHands())
+				if (!tile && unit && rule->isExplodingInHands() && !_allEnemiesNeutralized)
 				{
 					tile = unit->getTile();
 				}
@@ -523,7 +519,7 @@ void BattlescapeGame::endTurn()
 						if (rule->getBattleType() == BT_GRENADE) // it's a grenade to explode now
 						{
 							Position p = tile->getPosition().toVoxel() + Position(8, 8, -tile->getTerrainLevel() + (unit ? unit->getHeight() / 2 : 0));
-							forRemoval.push_back(std::tuple(nullptr, new ExplosionBState(this, p, BattleActionAttack{ BA_NONE, unit, item, item, })));
+							forRemoval.push_back(std::tuple(nullptr, new ExplosionBState(this, p, BattleActionAttack::GetBeforeShoot(BA_NONE, unit, item))));
 							exploded = true;
 						}
 						else
@@ -627,8 +623,9 @@ void BattlescapeGame::endTurn()
 			return;
 		case FORCE_LOSE:
 		default:
+			// force mission failure
 			_save->setAborted(true);
-			_parentState->finishBattle(true, 0);
+			_parentState->finishBattle(false, 0);
 			return;
 		}
 	}
@@ -1752,7 +1749,7 @@ void BattlescapeGame::primaryAction(Position pos)
 			if (_save->selectUnit(pos) && _save->selectUnit(pos)->getVisible())
 			{
 				auto targetFaction = _save->selectUnit(pos)->getFaction();
-				bool psiTargetAllowed = _currentAction.weapon->getRules()->isPsiTargetAllowed(targetFaction);
+				bool psiTargetAllowed = _currentAction.weapon->getRules()->isTargetAllowed(targetFaction);
 				if (_currentAction.type == BA_MINDCONTROL && targetFaction == FACTION_PLAYER)
 				{
 					// no mind controlling allies, unwanted side effects
@@ -2164,22 +2161,13 @@ void BattlescapeGame::spawnNewUnit(BattleActionAttack attack, Position position)
 		{
 			const RuleItem *newUnitWeapon = getMod()->getItem(newUnit->getType());
 			_save->createItemForUnit(newUnitWeapon, newUnit, true);
-			if (!newUnitWeapon->getPrimaryCompatibleAmmo()->empty())
+			if (newUnitWeapon->getVehicleClipAmmo())
 			{
-				RuleItem *ammo = getMod()->getItem(newUnitWeapon->getPrimaryCompatibleAmmo()->front());
+				const RuleItem *ammo = newUnitWeapon->getVehicleClipAmmo();
 				BattleItem *ammoItem = _save->createItemForUnit(ammo, newUnit);
 				if (ammoItem)
 				{
-					int clipSize;
-					if (ammo->getClipSize() > 0 && newUnitWeapon->getClipSize() > 0)
-					{
-						clipSize = newUnitWeapon->getClipSize();
-					}
-					else
-					{
-						clipSize = ammo->getClipSize();
-					}
-					ammoItem->setAmmoQuantity(clipSize);
+					ammoItem->setAmmoQuantity(newUnitWeapon->getVehicleClipSize());
 				}
 			}
 			newUnit->setTurretType(newUnitWeapon->getTurretType());
@@ -2482,7 +2470,7 @@ bool BattlescapeGame::worthTaking(BattleItem* item, BattleAction *action, bool p
 				{
 					if (i->getRules()->getBattleType() == BT_AMMO)
 					{
-						if (item->getRules()->getSlotForAmmo(i->getRules()->getType()) != -1)
+						if (item->getRules()->getSlotForAmmo(i->getRules()) != -1)
 						{
 							ammoFound = true;
 							break;
@@ -2504,7 +2492,7 @@ bool BattlescapeGame::worthTaking(BattleItem* item, BattleAction *action, bool p
 			{
 				if (i->getRules()->getBattleType() == BT_FIREARM)
 				{
-					if (i->getRules()->getSlotForAmmo(item->getRules()->getType()) != -1)
+					if (i->getRules()->getSlotForAmmo(item->getRules()) != -1)
 					{
 						weaponFound = true;
 						break;
@@ -2612,7 +2600,7 @@ bool BattlescapeGame::takeItem(BattleItem* item, BattleAction *action)
 	{
 		if (weapon && weapon->isWeaponWithAmmo() && !weapon->haveAllAmmo())
 		{
-			auto slot = weapon->getRules()->getSlotForAmmo(i->getRules()->getType());
+			auto slot = weapon->getRules()->getSlotForAmmo(i->getRules());
 			if (slot != -1)
 			{
 				BattleActionCost cost{ unit };
@@ -2753,15 +2741,15 @@ BattlescapeTally BattlescapeGame::tallyUnits()
 	for (std::vector<BattleUnit*>::iterator j = _save->getUnits()->begin(); j != _save->getUnits()->end(); ++j)
 	{
 		//TODO: add handling of stunned units for display purposes in AbortMissionState
-		if (!(*j)->isOut() && !(*j)->isOutThresholdExceed())
+		if (!(*j)->isOut() && (!(*j)->isOutThresholdExceed() || ((*j)->getUnitRules() && (*j)->getUnitRules()->getSpawnUnit())))
 		{
 			if ((*j)->getOriginalFaction() == FACTION_HOSTILE)
 			{
-				if (Options::allowPsionicCapture && (*j)->getFaction() == FACTION_PLAYER)
+				if (Options::allowPsionicCapture && (*j)->getFaction() == FACTION_PLAYER && (*j)->getCapturable())
 				{
 					// don't count psi-captured units
 				}
-				else if (isSurrendering((*j)))
+				else if (isSurrendering((*j)) && (*j)->getCapturable())
 				{
 					// don't count surrendered units
 				}
@@ -2852,6 +2840,58 @@ bool BattlescapeGame::getKneelReserved() const
  */
 int BattlescapeGame::checkForProximityGrenades(BattleUnit *unit)
 {
+	// death trap?
+	Tile* deathTrapTile = nullptr;
+	for (int sx = 0; sx < unit->getArmor()->getSize(); sx++)
+	{
+		for (int sy = 0; sy < unit->getArmor()->getSize(); sy++)
+		{
+			Tile* t = _save->getTile(unit->getPosition() + Position(sx, sy, 0));
+			if (!deathTrapTile && t && t->getFloorSpecialTileType() >= DEATH_TRAPS)
+			{
+				deathTrapTile = t;
+			}
+		}
+	}
+	if (deathTrapTile)
+	{
+		std::ostringstream ss;
+		ss << "STR_DEATH_TRAP_" << deathTrapTile->getFloorSpecialTileType();
+		auto deathTrapRule = getMod()->getItem(ss.str());
+		if (deathTrapRule &&
+			deathTrapRule->isTargetAllowed(unit->getOriginalFaction()) &&
+			(deathTrapRule->getBattleType() == BT_PROXIMITYGRENADE || deathTrapRule->getBattleType() == BT_MELEE))
+		{
+			BattleItem* deathTrapItem = nullptr;
+			for (auto item : *deathTrapTile->getInventory())
+			{
+				if (item->getRules() == deathTrapRule)
+				{
+					deathTrapItem = item;
+					break;
+				}
+			}
+			if (!deathTrapItem)
+			{
+				deathTrapItem = _save->createItemForTile(deathTrapRule, deathTrapTile);
+			}
+			if (deathTrapRule->getBattleType() == BT_PROXIMITYGRENADE)
+			{
+				deathTrapItem->setFuseTimer(0);
+				Position p = deathTrapTile->getPosition().toVoxel() + Position(8, 8, deathTrapTile->getTerrainLevel());
+				statePushNext(new ExplosionBState(this, p, BattleActionAttack::GetBeforeShoot(BA_NONE, nullptr, deathTrapItem)));
+				return 2;
+			}
+			else if (deathTrapRule->getBattleType() == BT_MELEE)
+			{
+				Position p = deathTrapTile->getPosition().toVoxel() + Position(8, 8, 12);
+				// EXPERIMENTAL: terrainMeleeTilePart = 4 (V_UNIT); no attacker
+				statePushNext(new ExplosionBState(this, p, BattleActionAttack::GetBeforeShoot(BA_HIT, nullptr, deathTrapItem), nullptr, false, 0, 0, 4));
+				return 2;
+			}
+		}
+	}
+
 	bool exploded = false;
 	bool glow = false;
 	int size = unit->getArmor()->getSize() + 1;
@@ -2872,7 +2912,7 @@ int BattlescapeGame::checkForProximityGrenades(BattleUnit *unit)
 						if (ruleItem->getBattleType() == BT_GRENADE || ruleItem->getBattleType() == BT_PROXIMITYGRENADE)
 						{
 							Position p = t->getPosition().toVoxel() + Position(8, 8, t->getTerrainLevel());
-							statePushNext(new ExplosionBState(this, p, BattleActionAttack{ BA_NONE, nullptr, item, item, }));
+							statePushNext(new ExplosionBState(this, p, BattleActionAttack::GetBeforeShoot(BA_NONE, nullptr, item)));
 							exploded = true;
 						}
 						else

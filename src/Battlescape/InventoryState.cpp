@@ -780,6 +780,12 @@ void InventoryState::loadGlobalLayout(int index)
 
 bool InventoryState::loadGlobalLayoutArmor(int index)
 {
+	auto armorName = _game->getSavedGame()->getGlobalEquipmentLayoutArmor(index);
+	return tryArmorChange(armorName);
+}
+
+bool InventoryState::tryArmorChange(const std::string& armorName)
+{
 	Armor* prev = nullptr;
 	Soldier* soldier = nullptr;
 	BattleUnit* unit = _inv->getSelectedUnit();
@@ -794,7 +800,6 @@ bool InventoryState::loadGlobalLayoutArmor(int index)
 
 	Armor* next = nullptr;
 	{
-		auto armorName = _game->getSavedGame()->getGlobalEquipmentLayoutArmor(index);
 		next = _game->getMod()->getArmor(armorName, false);
 	}
 
@@ -806,7 +811,7 @@ bool InventoryState::loadGlobalLayoutArmor(int index)
 		if (_game->getSavedGame()->getMonthsPassed() != -1)
 		{
 			// is the armor physically available?
-			if (next->getStoreItem() != Armor::NONE && prev->getStoreItem() != next->getStoreItem())
+			if (next->getStoreItem() && prev->getStoreItem() != next->getStoreItem())
 			{
 				if (_base->getStorageItems()->getItem(next->getStoreItem()) <= 0)
 				{
@@ -814,14 +819,13 @@ bool InventoryState::loadGlobalLayoutArmor(int index)
 				}
 			}
 			// is the armor unlocked?
-			if (!next->getRequiredResearch().empty() && !_game->getSavedGame()->isResearched(next->getRequiredResearch()))
+			if (next->getRequiredResearch() && !_game->getSavedGame()->isResearched(next->getRequiredResearch()))
 			{
 				armorAvailable = false;
 			}
 		}
 		// does the armor fit on the current unit?
-		if (!next->getUnits().empty() &&
-			std::find(next->getUnits().begin(), next->getUnits().end(), soldier->getRules()->getType()) == next->getUnits().end())
+		if (!next->getCanBeUsedBy(soldier->getRules()))
 		{
 			armorAvailable = false;
 		}
@@ -842,11 +846,11 @@ bool InventoryState::loadGlobalLayoutArmor(int index)
 		}
 		if (_game->getSavedGame()->getMonthsPassed() != -1)
 		{
-			if (prev->getStoreItem() != Armor::NONE)
+			if (prev->getStoreItem())
 			{
 				_base->getStorageItems()->addItem(prev->getStoreItem());
 			}
-			if (next->getStoreItem() != Armor::NONE)
+			if (next->getStoreItem())
 			{
 				_base->getStorageItems()->removeItem(next->getStoreItem());
 			}
@@ -1160,6 +1164,16 @@ void InventoryState::btnCreatePersonalTemplateClick(Action *)
 		// create new personal template
 		_createInventoryTemplate(personalTemplate);
 
+		// optionally save armor info too
+		if (Options::oxcePersonalLayoutIncludingArmor)
+		{
+			unit->getGeoscapeSoldier()->setPersonalEquipmentArmor(_battleGame->getSelectedUnit()->getArmor());
+		}
+		else
+		{
+			unit->getGeoscapeSoldier()->setPersonalEquipmentArmor(nullptr);
+		}
+
 		// give visual feedback
 		_inv->showWarning(tr("STR_PERSONAL_EQUIPMENT_SAVED"));
 
@@ -1354,6 +1368,27 @@ void InventoryState::btnApplyPersonalTemplateClick(Action *)
 	auto unit = _battleGame->getSelectedUnit();
 	if (unit && unit->getGeoscapeSoldier())
 	{
+		// optionally load armor too
+		if (Options::oxcePersonalLayoutIncludingArmor)
+		{
+			auto newArmor = unit->getGeoscapeSoldier()->getPersonalEquipmentArmor();
+			if (newArmor && newArmor != unit->getArmor())
+			{
+				bool success = tryArmorChange(newArmor->getType());
+
+				if (success)
+				{
+					_reloadUnit = true;
+					init();
+				}
+				else
+				{
+					// FIXME: a better message? or no message?
+					//_inv->showWarning(tr("STR_NOT_ENOUGH_ITEMS_FOR_TEMPLATE"));
+				}
+			}
+		}
+
 		auto& personalTemplate = *unit->getGeoscapeSoldier()->getPersonalEquipmentLayout();
 
 		_applyInventoryTemplate(personalTemplate);

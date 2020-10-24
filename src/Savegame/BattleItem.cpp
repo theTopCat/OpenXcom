@@ -24,6 +24,7 @@
 #include "SavedBattleGame.h"
 #include "../Mod/Mod.h"
 #include "../Mod/RuleItem.h"
+#include "../Mod/RuleSkill.h"
 #include "../Mod/RuleInventory.h"
 #include "../Engine/Collections.h"
 #include "../Engine/Surface.h"
@@ -745,7 +746,7 @@ bool BattleItem::haveAllAmmo() const
  */
 bool BattleItem::setAmmoPreMission(BattleItem *item)
 {
-	int slot = _rules->getSlotForAmmo(item->getRules()->getType());
+	int slot = _rules->getSlotForAmmo(item->getRules());
 	if (slot >= 0)
 	{
 		if (_ammoItem[slot])
@@ -1160,7 +1161,7 @@ void BattleItem::setTurnFlag(bool flag)
  * Converts an unconscious body into a dead one.
  * @param rules the rules of the corpse item to convert this item into.
  */
-void BattleItem::convertToCorpse(RuleItem *rules)
+void BattleItem::convertToCorpse(const RuleItem *rules)
 {
 	if (_unit && _rules->getBattleType() == BT_CORPSE && rules->getBattleType() == BT_CORPSE)
 	{
@@ -1549,18 +1550,52 @@ ModScript::TryPsiAttackItemParser::TryPsiAttackItemParser(ScriptGlobal* shared, 
 	"item",
 	"attacker",
 	"victim",
+	"skill",
 	"attack_strength",
 	"defense_strength",
 	"battle_action",
 	"random",
 	"distance",
-	"distance_strength_reduction" }
+	"distance_strength_reduction",
+	"battle_game",
+}
 {
 	BindBase b { this };
 
 	b.addCustomPtr<const Mod>("rules", mod);
 
 	setDefault("var int r; random.randomRange r 0 55; add psi_attack_success attack_strength; add psi_attack_success r; sub psi_attack_success defense_strength; sub psi_attack_success distance_strength_reduction; return psi_attack_success;");
+}
+
+ModScript::TryMeleeAttackItemParser::TryMeleeAttackItemParser(ScriptGlobal* shared, const std::string& name, Mod* mod) : ScriptParserEvents{ shared, name,
+	"melee_attack_success",
+
+	"item",
+	"attacker",
+	"victim",
+	"skill",
+	"attack_strength",
+	"defense_strength",
+	"battle_action",
+	"random",
+	"arc_to_attacker",
+	"defense_strength_penalty",
+	"battle_game",
+}
+{
+	BindBase b { this };
+
+	b.addCustomPtr<const Mod>("rules", mod);
+
+	setDefault(
+		"var int r;\n"
+		"random.randomRange r 0 99;\n"
+		"sub melee_attack_success r;\n"
+		"add melee_attack_success attack_strength;\n"
+		"sub melee_attack_success defense_strength;\n"
+		"add melee_attack_success defense_strength_penalty;\n"
+		"return melee_attack_success;\n"
+	);
 }
 
 /**

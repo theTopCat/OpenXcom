@@ -151,25 +151,6 @@ void Ufo::load(const YAML::Node &node, const Mod &mod, SavedGame &game)
 	{
 		_status = (UfoStatus)status.as<int>();
 	}
-	else
-	{
-		if (_damage >= _stats.damageMax)
-		{
-			_status = DESTROYED;
-		}
-		else if (_damage >= _stats.damageMax / 2)
-		{
-			_status = CRASHED;
-		}
-		else if (_altitude == "STR_GROUND")
-		{
-			_status = LANDED;
-		}
-		else
-		{
-			_status = FLYING;
-		}
-	}
 	if (game.getMonthsPassed() != -1)
 	{
 		int missionID = node["mission"].as<int>();
@@ -479,20 +460,13 @@ void Ufo::setDamage(int damage, const Mod *mod)
 	{
 		_damage = 0;
 	}
-	if (_damage >= _stats.damageMax)
+	if (isDestroyed())
 	{
 		_status = DESTROYED;
 	}
-	else if (_damage >= _stats.damageMax / 2)
+	else if (isCrashed())
 	{
-		if (_huntBehavior == 1 || _rules->isUnmanned())
-		{
-			// kamikaze never crash lands; unmanned ditto
-		}
-		else
-		{
-			_status = CRASHED;
-		}
+		_status = CRASHED;
 	}
 	if (_status == CRASHED || _status == DESTROYED)
 	{
@@ -619,6 +593,16 @@ void Ufo::setAltitude(const std::string &altitude)
  */
 bool Ufo::isCrashed() const
 {
+	// Note: yes, this condition is necessary (in OXCE) and cannot be removed!
+	if (isDestroyed())
+		return true;
+
+	if (_huntBehavior == 1 || _rules->isUnmanned())
+	{
+		// kamikaze never crash lands; unmanned ditto
+		return false;
+	}
+
 	return (_damage > _stats.damageMax / 2);
 }
 

@@ -44,13 +44,14 @@ void RuleResearch::load(const YAML::Node &node, Mod* mod, int listOrder)
 	_lookup = node["lookup"].as<std::string>(_lookup);
 	_cutscene = node["cutscene"].as<std::string>(_cutscene);
 	_spawnedItem = node["spawnedItem"].as<std::string>(_spawnedItem);
+	_spawnedEvent = node["spawnedEvent"].as<std::string>(_spawnedEvent);
 	_cost = node["cost"].as<int>(_cost);
 	_points = node["points"].as<int>(_points);
-	_dependenciesName = node["dependencies"].as< std::vector<std::string> >(_dependenciesName);
-	_unlocksName = node["unlocks"].as< std::vector<std::string> >(_unlocksName);
-	_disablesName = node["disables"].as< std::vector<std::string> >(_disablesName);
-	_getOneFreeName = node["getOneFree"].as< std::vector<std::string> >(_getOneFreeName);
-	_requiresName = node["requires"].as< std::vector<std::string> >(_requiresName);
+	mod->loadUnorderedNames(_name, _dependenciesName, node["dependencies"]);
+	mod->loadUnorderedNames(_name, _unlocksName, node["unlocks"]);
+	mod->loadUnorderedNames(_name, _disablesName, node["disables"]);
+	mod->loadUnorderedNames(_name, _getOneFreeName, node["getOneFree"]);
+	mod->loadUnorderedNames(_name, _requiresName, node["requires"]);
 	mod->loadBaseFunction(_name, _requiresBaseFunc, node["requiresBaseFunc"]);
 	_sequentialGetOneFree = node["sequentialGetOneFree"].as<bool>(_sequentialGetOneFree);
 	_getOneFreeProtectedName = node["getOneFreeProtected"].as< std::map<std::string, std::vector<std::string> > >(_getOneFreeProtectedName);
@@ -73,6 +74,11 @@ void RuleResearch::load(const YAML::Node &node, Mod* mod, int listOrder)
  */
 void RuleResearch::afterLoad(const Mod* mod)
 {
+	if (_lookup == _name)
+	{
+		_lookup = "";
+	}
+
 	_dependencies = mod->getResearch(_dependenciesName);
 	_unlocks = mod->getResearch(_unlocksName);
 	_disables = mod->getResearch(_disablesName);

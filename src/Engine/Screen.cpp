@@ -22,6 +22,7 @@
 #include <cmath>
 #include <iomanip>
 #include <climits>
+#include <cstdio>
 #include "../lodepng.h"
 #include "Exception.h"
 #include "Surface.h"
@@ -40,6 +41,13 @@ namespace OpenXcom
 
 const int Screen::ORIGINAL_WIDTH = 320;
 const int Screen::ORIGINAL_HEIGHT = 200;
+
+static const int VIDEO_WINDOW_POS_LEN = 40;
+static char VIDEO_WINDOW_POS[VIDEO_WINDOW_POS_LEN];
+
+static const char* SDL_VIDEO_CENTERED_UNSET = "SDL_VIDEO_CENTERED=";
+static const char* SDL_VIDEO_CENTERED_CENTER = "SDL_VIDEO_CENTERED=center";
+static const char* SDL_VIDEO_WINDOW_POS_UNSET = "SDL_VIDEO_WINDOW_POS=";
 
 /**
  * Sets up all the internal display flags depending on
@@ -69,20 +77,19 @@ void Screen::makeVideoFlags()
 	// Handle window positioning
 	if (!Options::fullscreen && Options::rootWindowedMode)
 	{
-		std::ostringstream ss;
-		ss << "SDL_VIDEO_WINDOW_POS=" << std::dec << Options::windowedModePositionX << "," << Options::windowedModePositionY;
-		SDL_putenv(const_cast<char*>(strdup(ss.str().c_str())));
-		SDL_putenv(const_cast<char*>("SDL_VIDEO_CENTERED="));
+		snprintf(VIDEO_WINDOW_POS, VIDEO_WINDOW_POS_LEN, "SDL_VIDEO_WINDOW_POS=%d,%d", Options::windowedModePositionX, Options::windowedModePositionY);
+		SDL_putenv(VIDEO_WINDOW_POS);
+		SDL_putenv((char *)SDL_VIDEO_CENTERED_UNSET);
 	}
 	else if (Options::borderless)
 	{
-		SDL_putenv(const_cast<char*>("SDL_VIDEO_WINDOW_POS="));
-		SDL_putenv(const_cast<char*>("SDL_VIDEO_CENTERED=center"));
+		SDL_putenv((char *)SDL_VIDEO_WINDOW_POS_UNSET);
+		SDL_putenv((char *)SDL_VIDEO_CENTERED_CENTER);
 	}
 	else
 	{
-		SDL_putenv(const_cast<char*>("SDL_VIDEO_WINDOW_POS="));
-		SDL_putenv(const_cast<char*>("SDL_VIDEO_CENTERED="));
+		SDL_putenv((char *)SDL_VIDEO_WINDOW_POS_UNSET);
+		SDL_putenv((char *)SDL_VIDEO_CENTERED_UNSET);
 	}
 
 	// Handle display mode
@@ -105,8 +112,10 @@ void Screen::makeVideoFlags()
  * Initializes a new display screen for the game to render contents to.
  * The screen is set up based on the current options.
  */
-Screen::Screen() : _baseWidth(ORIGINAL_WIDTH), _baseHeight(ORIGINAL_HEIGHT), _scaleX(1.0), _scaleY(1.0), _flags(0), _numColors(0), _firstColor(0), _pushPalette(false)
+Screen::Screen() : _baseWidth(ORIGINAL_WIDTH), _baseHeight(ORIGINAL_HEIGHT), _scaleX(1.0), _scaleY(1.0), _flags(0), _numColors(0), _firstColor(0), _pushPalette(false), _flickerFix(false)
 {
+	_flickerFix = Options::oxceEnablePaletteFlickerFix;
+
 	resetDisplay();
 	memset(deferredPalette, 0, 256*sizeof(SDL_Color));
 }
@@ -182,7 +191,7 @@ void Screen::handle(Action *action)
 void Screen::flip()
 {
 	// perform any requested palette update
-	if (_pushPalette && _numColors && _screen->format->BitsPerPixel == 8)
+	if (_flickerFix && _pushPalette && _numColors && _screen->format->BitsPerPixel == 8)
 	{
 		if (_screen->format->BitsPerPixel == 8 && SDL_SetColors(_screen, &(deferredPalette[_firstColor]), _firstColor, _numColors) == 0)
 		{
@@ -199,6 +208,17 @@ void Screen::flip()
 	else
 	{
 		SDL_BlitSurface(_surface.get(), 0, _screen, 0);
+	}
+
+	// perform any requested palette update
+	if (!_flickerFix && _pushPalette && _numColors && _screen->format->BitsPerPixel == 8)
+	{
+		if (_screen->format->BitsPerPixel == 8 && SDL_SetColors(_screen, &(deferredPalette[_firstColor]), _firstColor, _numColors) == 0)
+		{
+			Log(LOG_DEBUG) << "Display palette doesn't match requested palette";
+		}
+		_numColors = 0;
+		_pushPalette = false;
 	}
 
 

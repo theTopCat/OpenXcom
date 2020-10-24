@@ -135,20 +135,6 @@ TransferItemsState::TransferItemsState(Base *baseFrom, Base *baseTo, DebriefingS
 	_cats.push_back("STR_ALL_ITEMS");
 	_cats.push_back("STR_ITEMS_AT_DESTINATION");
 
-	const std::vector<std::string> &cw = _game->getMod()->getCraftWeaponsList();
-	for (std::vector<std::string>::const_iterator i = cw.begin(); i != cw.end(); ++i)
-	{
-		RuleCraftWeapon *rule = _game->getMod()->getCraftWeapon(*i);
-		_craftWeapons.insert(rule->getLauncherItem());
-		_craftWeapons.insert(rule->getClipItem());
-	}
-	const std::vector<std::string> &ar = _game->getMod()->getArmorsList();
-	for (std::vector<std::string>::const_iterator i = ar.begin(); i != ar.end(); ++i)
-	{
-		Armor *rule = _game->getMod()->getArmor(*i);
-		_armors.insert(rule->getStoreItem());
-	}
-
 	for (std::vector<Soldier*>::iterator i = _baseFrom->getSoldiers()->begin(); i != _baseFrom->getSoldiers()->end(); ++i)
 	{
 		if (_debriefingState) break;
@@ -218,7 +204,8 @@ TransferItemsState::TransferItemsState(Base *baseFrom, Base *baseTo, DebriefingS
 		}
 	}
 
-	if (_game->getMod()->getUseCustomCategories())
+	_vanillaCategories = _cats.size();
+	if (_game->getMod()->getDisplayCustomCategories() > 0)
 	{
 		bool hasUnassigned = false;
 
@@ -243,9 +230,13 @@ TransferItemsState::TransferItemsState(Base *baseFrom, Base *baseTo, DebriefingS
 			}
 		}
 		// then use them nicely in order
-		_cats.clear();
-		_cats.push_back("STR_ALL_ITEMS");
-		_cats.push_back("STR_ITEMS_AT_DESTINATION");
+		if (_game->getMod()->getDisplayCustomCategories() == 1)
+		{
+			_cats.clear();
+			_cats.push_back("STR_ALL_ITEMS");
+			_cats.push_back("STR_ITEMS_AT_DESTINATION");
+			_vanillaCategories = _cats.size();
+		}
 		const std::vector<std::string> &categories = _game->getMod()->getItemCategoriesList();
 		for (std::vector<std::string>::const_iterator k = categories.begin(); k != categories.end(); ++k)
 		{
@@ -317,18 +308,18 @@ std::string TransferItemsState::getCategory(int sel) const
 		rule = (RuleItem*)_items[sel].rule;
 		if (rule->getBattleType() == BT_CORPSE || rule->isAlien())
 		{
+			if (rule->getVehicleUnit())
+				return "STR_PERSONNEL"; // OXCE: critters fighting for us
+			if (rule->isAlien())
+				return "STR_PRISONERS"; // OXCE: live aliens
 			return "STR_ALIENS";
 		}
 		if (rule->getBattleType() == BT_NONE)
 		{
-			if (_craftWeapons.find(rule->getType()) != _craftWeapons.end())
-			{
+			if (_game->getMod()->isCraftWeaponStorageItem(rule))
 				return "STR_CRAFT_ARMAMENT";
-			}
-			if (_armors.find(rule->getType()) != _armors.end())
-			{
-				return "STR_EQUIPMENT";
-			}
+			if (_game->getMod()->isArmorStorageItem(rule))
+				return "STR_ARMORS"; // OXCE: armors
 			return "STR_COMPONENTS";
 		}
 		return "STR_EQUIPMENT";
@@ -397,7 +388,8 @@ void TransferItemsState::updateList()
 	_lstItems->clearList();
 	_rows.clear();
 
-	std::string cat = _cats[_cbxCategory->getSelected()];
+	size_t selCategory = _cbxCategory->getSelected();
+	const std::string cat = _cats[selCategory];
 	bool allItems = (cat == "STR_ALL_ITEMS");
 	bool onlyItemsAtDestination = (cat == "STR_ITEMS_AT_DESTINATION");
 	bool categoryUnassigned = (cat == "STR_UNASSIGNED");
@@ -406,7 +398,7 @@ void TransferItemsState::updateList()
 	for (size_t i = 0; i < _items.size(); ++i)
 	{
 		// filter
-		if (_game->getMod()->getUseCustomCategories())
+		if (selCategory >= _vanillaCategories)
 		{
 			if (categoryUnassigned && _items[i].type == TRANSFER_ITEM)
 			{
@@ -593,7 +585,7 @@ void TransferItemsState::completeTransfer()
 				break;
 			case TRANSFER_ITEM:
 				RuleItem *item = (RuleItem*)i->rule;
-				_baseFrom->getStorageItems()->removeItem(item->getType(), i->amount);
+				_baseFrom->getStorageItems()->removeItem(item, i->amount);
 				t = new Transfer(time);
 				t->setItems(item->getType(), i->amount);
 				_baseTo->getTransfers()->push_back(t);
@@ -802,13 +794,17 @@ void TransferItemsState::increaseByValue(int change)
 		{
 			errorMessage = tr("STR_NO_FREE_HANGARS_FOR_TRANSFER");
 		}
-		else if (_pQty + craft->getNumSoldiers() > _baseTo->getAvailableQuarters() - _baseTo->getUsedQuarters())
+		else if (craft->getNumSoldiers() > 0 && _pQty + craft->getNumSoldiers() > _baseTo->getAvailableQuarters() - _baseTo->getUsedQuarters())
 		{
 			errorMessage = tr("STR_NO_FREE_ACCOMODATION_CREW");
 		}
-		else if (Options::storageLimitsEnforced && _baseTo->storesOverfull(_iQty + craft->getItems()->getTotalSize(_game->getMod())))
+		else if (Options::storageLimitsEnforced)
 		{
-			errorMessage = tr("STR_NOT_ENOUGH_STORE_SPACE_FOR_CRAFT");
+			auto used = craft->getTotalItemStorageSize(_game->getMod());
+			if (used > 0.0 && _baseTo->storesOverfull(_iQty + used))
+			{
+				errorMessage = tr("STR_NOT_ENOUGH_STORE_SPACE_FOR_CRAFT");
+			}
 		}
 		break;
 	case TRANSFER_ITEM:
@@ -843,7 +839,7 @@ void TransferItemsState::increaseByValue(int change)
 		case TRANSFER_CRAFT:
 			_cQty++;
 			_pQty += craft->getNumSoldiers();
-			_iQty += craft->getItems()->getTotalSize(_game->getMod());
+			_iQty += craft->getTotalItemStorageSize(_game->getMod());
 			getRow().amount++;
 			if (!Options::canTransferCraftsWhileAirborne || craft->getStatus() != "STR_OUT")
 				_total += getRow().cost;
@@ -915,7 +911,7 @@ void TransferItemsState::decreaseByValue(int change)
 		craft = (Craft*)getRow().rule;
 		_cQty--;
 		_pQty -= craft->getNumSoldiers();
-		_iQty -= craft->getItems()->getTotalSize(_game->getMod());
+		_iQty -= craft->getTotalItemStorageSize(_game->getMod());
 		break;
 	case TRANSFER_ITEM:
 		const RuleItem *selItem = (RuleItem*)getRow().rule;

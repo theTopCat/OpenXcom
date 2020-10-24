@@ -29,10 +29,13 @@
 namespace OpenXcom
 {
 
-enum ForcedTorso : Uint8 { TORSO_USE_GENDER, TORSO_ALWAYS_MALE, TORSO_ALWAYS_FEMALE };
-enum UnitSide : Uint8 { SIDE_FRONT, SIDE_LEFT, SIDE_RIGHT, SIDE_REAR, SIDE_UNDER, SIDE_MAX };
+enum ForcedTorso : Uint8;
+enum UnitSide : Uint8;
 
 class BattleUnit;
+class RuleItem;
+class RuleResearch;
+class RuleSoldier;
 
 /**
  * Represents a specific type of armor.
@@ -50,16 +53,29 @@ public:
 
 	static const std::string NONE;
 private:
-	std::string _type, _spriteSheet, _spriteInv, _corpseGeo, _storeItem, _specWeapon;
-	std::string _requires;
+	std::string _type, _spriteSheet, _spriteInv, _corpseGeoName, _storeItemName, _specWeaponName;
+	std::string _requiresName;
 	std::string _layersDefaultPrefix;
 	std::map<int, std::string> _layersSpecificPrefix;
 	std::map<std::string, std::vector<std::string> > _layersDefinition;
-	std::vector<std::string> _corpseBattle;
-	std::vector<std::string> _builtInWeapons;
+	std::vector<std::string> _corpseBattleNames;
+	std::vector<std::string> _builtInWeaponsNames;
+	std::vector<std::string> _unitsNames;
+
+	std::vector<const RuleItem*> _corpseBattle;
+	std::vector<const RuleItem*> _builtInWeapons;
+	std::vector<const RuleSoldier*> _units;
+	const RuleResearch* _requires = nullptr;
+	const RuleItem* _corpseGeo = nullptr;
+	const RuleItem* _storeItem = nullptr;
+	const RuleItem* _specWeapon = nullptr;
+
+	bool _infiniteSupply;
 	int _frontArmor, _sideArmor, _leftArmorDiff, _rearArmor, _underArmor, _drawingRoutine;
 	bool _drawBubbles;
 	MovementType _movementType;
+	bool _turnBeforeFirstStep;
+	int _turnCost;
 	int _moveSound;
 	std::vector<int> _deathSoundMale, _deathSoundFemale;
 	std::vector<int> _selectUnitSoundMale, _selectUnitSoundFemale;
@@ -67,7 +83,7 @@ private:
 	std::vector<int> _selectWeaponSoundMale, _selectWeaponSoundFemale;
 	std::vector<int> _annoyedSoundMale, _annoyedSoundFemale;
 	int _size, _weight, _visibilityAtDark, _visibilityAtDay, _personalLight;
-	int _camouflageAtDay, _camouflageAtDark, _antiCamouflageAtDay, _antiCamouflageAtDark, _heatVision, _psiVision;
+	int _camouflageAtDay, _camouflageAtDark, _antiCamouflageAtDay, _antiCamouflageAtDark, _heatVision, _psiVision, _psiCamouflage;
 	float _damageModifier[DAMAGE_TYPES];
 	std::vector<int> _loftempsSet;
 	UnitStats _stats;
@@ -83,10 +99,10 @@ private:
 	RuleStatBonus _timeRecovery, _energyRecovery, _moraleRecovery, _healthRecovery, _stunRecovery, _manaRecovery;
 	ModScript::BattleUnitScripts::Container _battleUnitScripts;
 
-	std::vector<std::string> _units;
 	ScriptValues<Armor> _scriptValues;
 	std::vector<int> _customArmorPreviewIndex;
 	Sint8 _allowsRunning, _allowsStrafing, _allowsKneeling, _allowsMoving;
+	bool _allowTwoMainWeapons;
 	bool _instantWoundRecovery;
 	int _standHeight, _kneelHeight, _floatHeight;
 public:
@@ -94,8 +110,14 @@ public:
 	Armor(const std::string &type);
 	/// Cleans up the armor ruleset.
 	~Armor();
+
 	/// Loads the armor data from YAML.
 	void load(const YAML::Node& node, const ModScript& parsers, Mod *mod);
+	/// Cross link with other rules.
+	void afterLoad(const Mod* mod);
+	/// Gets whether or not there is an infinite supply of this armor.
+	bool hasInfiniteSupply() const { return _infiniteSupply; }
+
 	/// Gets the armor's type.
 	const std::string& getType() const;
 	/// Gets the unit's sprite sheet.
@@ -115,15 +137,15 @@ public:
 	/// Gets the armor level of armor side.
 	int getArmor(UnitSide side) const;
 	/// Gets the Geoscape corpse item.
-	std::string getCorpseGeoscape() const;
+	const RuleItem* getCorpseGeoscape() const;
 	/// Gets the Battlescape corpse item.
-	const std::vector<std::string> &getCorpseBattlescape() const;
+	const std::vector<const RuleItem*> &getCorpseBattlescape() const;
 	/// Gets the stores item.
-	std::string getStoreItem() const;
+	const RuleItem* getStoreItem() const;
 	/// Gets the special weapon type.
-	std::string getSpecialWeapon() const;
+	const RuleItem* getSpecialWeapon() const;
 	/// Gets the research required to be able to equip this armor.
-	const std::string &getRequiredResearch() const;
+	const RuleResearch* getRequiredResearch() const;
 
 	/// Gets the default prefix for layered armor sprite names.
 	const std::string &getLayersDefaultPrefix() const { return _layersDefaultPrefix; }
@@ -138,6 +160,12 @@ public:
 	bool drawBubbles() const;
 	/// DO NOT USE THIS FUNCTION OUTSIDE THE BATTLEUNIT CONSTRUCTOR OR I WILL HUNT YOU DOWN.
 	MovementType getMovementType() const;
+
+	/// Should turning before first step cost TU or not?
+	bool getTurnBeforeFirstStep() const { return _turnBeforeFirstStep; }
+	/// Gets the turn cost.
+	int getTurnCost() const { return _turnCost; }
+
 	/// Gets the move sound id. Overrides default/unit's move sound. To be used in BattleUnit constructors only too!
 	int getMoveSound() const;
 	/// Gets the male death sounds.
@@ -210,7 +238,7 @@ public:
 	/// Checks if this armor ignores gender (power suit/flying suit).
 	ForcedTorso getForcedTorso() const;
 	/// Gets built-in weapons of armor.
-	const std::vector<std::string> &getBuiltInWeapons() const;
+	const std::vector<const RuleItem*> &getBuiltInWeapons() const;
 	/// Gets max view distance at dark in BattleScape.
 	int getVisibilityAtDark() const;
 	/// Gets max view distance at day in BattleScape.
@@ -227,6 +255,8 @@ public:
 	int getHeatVision() const;
 	/// Gets info about psi vision.
 	int getPsiVision() const;
+	/// Gets info about psi camouflage.
+	int getPsiCamouflage() const;
 	/// Gets personal light radius;
 	int getPersonalLight() const;
 	/// Gets how armor react to fear.
@@ -270,8 +300,13 @@ public:
 	const typename Script::Container &getScript() const { return _battleUnitScripts.get<Script>(); }
 	/// Get all script values.
 	const ScriptValues<Armor> &getScriptValuesRaw() const { return _scriptValues; }
+
 	/// Gets the armor's units.
-	const std::vector<std::string> &getUnits() const;
+	const std::vector<const RuleSoldier*> &getUnits() const;
+	/// Check if a soldier can use this armor.
+	bool getCanBeUsedBy(const RuleSoldier* soldier) const;
+
+
 	/// Gets the index of the sprite in the CustomArmorPreview sprite set
 	const std::vector<int> &getCustomArmorPreviewIndex() const;
 	/// Can you run while wearing this armor?
@@ -282,6 +317,8 @@ public:
 	bool allowsKneeling(bool def = true) const;
 	/// Can you move while wearing this armor?
 	bool allowsMoving() const;
+	/// Does this armor allow two main weapons during autoequip?
+	bool getAllowTwoMainWeapons() const { return _allowTwoMainWeapons; }
 	/// Does this armor instantly recover any wounds after the battle?
 	bool getInstantWoundRecovery() const;
 	/// Gets a unit's height when standing while wearing this armor.

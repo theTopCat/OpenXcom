@@ -31,7 +31,7 @@ RuleSoldierTransformation::RuleSoldierTransformation(const std::string &name) :
 	_name(name),
 	_keepSoldierArmor(false), _createsClone(false), _needsCorpseRecovered(true),
 	_allowsDeadSoldiers(false), _allowsLiveSoldiers(false), _allowsWoundedSoldiers(false),
-	_listOrder(0), _cost(0), _transferTime(0), _recoveryTime(0), _minRank(0),
+	_listOrder(0), _cost(0), _transferTime(0), _recoveryTime(0), _minRank(0), _includeBonusesForMinStats(false),
 	_showMinMax(false), _lowerBoundAtMinStats(true), _upperBoundAtMaxStats(false), _upperBoundAtStatCaps(false), _upperBoundType(0),
 	_reset(false)
 {
@@ -54,7 +54,7 @@ void RuleSoldierTransformation::load(const YAML::Node &node, Mod* mod, int listO
 		_listOrder = listOrder;
 	}
 
-	_requires = node["requires"].as<std::vector<std::string > >(_requires);
+	mod->loadUnorderedNames(_name, _requires, node["requires"]);
 	mod->loadBaseFunction(_name, _requiresBaseFunc, node["requiresBaseFunc"]);
 	_producedItem = node["producedItem"].as<std::string >(_producedItem);
 	_producedSoldierType = node["producedSoldierType"].as<std::string >(_producedSoldierType);
@@ -65,12 +65,13 @@ void RuleSoldierTransformation::load(const YAML::Node &node, Mod* mod, int listO
 	_allowsDeadSoldiers = node["allowsDeadSoldiers"].as<bool >(_allowsDeadSoldiers);
 	_allowsLiveSoldiers = node["allowsLiveSoldiers"].as<bool >(_allowsLiveSoldiers);
 	_allowsWoundedSoldiers = node["allowsWoundedSoldiers"].as<bool >(_allowsWoundedSoldiers);
-	_allowedSoldierTypes = node["allowedSoldierTypes"].as<std::vector<std::string > >(_allowedSoldierTypes);
-	_requiredPreviousTransformations = node["requiredPreviousTransformations"].as<std::vector<std::string > >(_requiredPreviousTransformations);
-	_forbiddenPreviousTransformations = node["forbiddenPreviousTransformations"].as<std::vector<std::string > >(_forbiddenPreviousTransformations);
+	mod->loadUnorderedNames(_name, _allowedSoldierTypes, node["allowedSoldierTypes"]);
+	mod->loadUnorderedNames(_name, _requiredPreviousTransformations, node["requiredPreviousTransformations"]);
+	mod->loadUnorderedNames(_name, _forbiddenPreviousTransformations, node["forbiddenPreviousTransformations"]);
+	_includeBonusesForMinStats = node["includeBonusesForMinStats"].as<bool >(_includeBonusesForMinStats);
 	_requiredMinStats = node["requiredMinStats"].as<UnitStats >(_requiredMinStats);
-	_requiredItems = node["requiredItems"].as< std::map<std::string, int> >(_requiredItems);
-	_requiredCommendations = node["requiredCommendations"].as< std::map<std::string, int> >(_requiredCommendations);
+	mod->loadUnorderedNamesToInt(_name, _requiredItems, node["requiredItems"]);
+	mod->loadUnorderedNamesToInt(_name, _requiredCommendations, node["requiredCommendations"]);
 	_cost = node["cost"].as<int>(_cost);
 	_transferTime = node["transferTime"].as<int>(_transferTime);
 	_recoveryTime = node["recoveryTime"].as<int>(_recoveryTime);

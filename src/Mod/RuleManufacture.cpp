@@ -22,6 +22,7 @@
 #include "RuleResearch.h"
 #include "RuleCraft.h"
 #include "RuleItem.h"
+#include "Mod.h"
 #include "../Engine/Collections.h"
 
 namespace OpenXcom
@@ -55,17 +56,21 @@ void RuleManufacture::load(const YAML::Node &node, Mod* mod, int listOrder)
 		_producedItemsNames[_name] = value;
 	}
 	_category = node["category"].as<std::string>(_category);
-	_requiresName = node["requires"].as< std::vector<std::string> >(_requiresName);
+	mod->loadUnorderedNames(_name, _requiresName, node["requires"]);
 	mod->loadBaseFunction(_name, _requiresBaseFunc, node["requiresBaseFunc"]);
 	_space = node["space"].as<int>(_space);
 	_time = node["time"].as<int>(_time);
 	_cost = node["cost"].as<int>(_cost);
 	_refund = node["refund"].as<bool>(_refund);
-	_requiredItemsNames = node["requiredItems"].as< std::map<std::string, int> >(_requiredItemsNames);
-	_producedItemsNames = node["producedItems"].as< std::map<std::string, int> >(_producedItemsNames);
+	mod->loadUnorderedNamesToInt(_name, _requiredItemsNames, node["requiredItems"]);
+	mod->loadUnorderedNamesToInt(_name, _producedItemsNames, node["producedItems"]);
 	_randomProducedItemsNames = node["randomProducedItems"].as< std::vector<std::pair<int, std::map<std::string, int> > > >(_randomProducedItemsNames);
 	_spawnedPersonType = node["spawnedPersonType"].as<std::string>(_spawnedPersonType);
 	_spawnedPersonName = node["spawnedPersonName"].as<std::string>(_spawnedPersonName);
+	if (node["spawnedSoldier"])
+	{
+		_spawnedSoldier = node["spawnedSoldier"];
+	}
 	_listOrder = node["listOrder"].as<int>(_listOrder);
 	if (!_listOrder)
 	{
@@ -261,6 +266,17 @@ int RuleManufacture::getManufactureTime() const
 int RuleManufacture::getManufactureCost() const
 {
 	return _cost;
+}
+
+/**
+ * Checks if there's enough funds to manufacture one object.
+ * @param funds Current funds.
+ * @return True if manufacture is possible.
+ */
+bool RuleManufacture::haveEnoughMoneyForOneMoreUnit(int64_t funds) const
+{
+	// either we have enough money, or the production doesn't cost anything
+	return funds >= _cost || _cost <= 0;
 }
 
 /**
